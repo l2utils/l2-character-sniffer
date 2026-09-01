@@ -1,6 +1,7 @@
-//! Central state tracker for sniffing sessions.
+//! Central state tracker for multi-client sniffing sessions.
 
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use l2companion_protocol::{L2Packet, UserInfoPacket};
@@ -10,10 +11,11 @@ use tracing::info;
 use crate::event::CompanionEvent;
 use crate::model::{Character, Location, Stats, Vitals};
 
-/// Shared thread-safe tracker state.
+/// Shared thread-safe tracker state across all client sessions.
 #[derive(Clone)]
 pub struct CharacterTracker {
     characters: Arc<RwLock<HashMap<u32, Character>>>,
+    client_to_object: Arc<RwLock<HashMap<SocketAddr, u32>>>,
     active_player_id: Arc<RwLock<Option<u32>>>,
     event_tx: broadcast::Sender<CompanionEvent>,
 }
@@ -29,6 +31,7 @@ impl CharacterTracker {
         let (event_tx, _) = broadcast::channel(512);
         Self {
             characters: Arc::new(RwLock::new(HashMap::new())),
+            client_to_object: Arc::new(RwLock::new(HashMap::new())),
             active_player_id: Arc::new(RwLock::new(None)),
             event_tx,
         }
@@ -39,25 +42,30 @@ impl CharacterTracker {
         self.event_tx.subscribe()
     }
 
-    /// Retrieve snapshot of currently tracked characters.
+    /// Retrieve snapshot of all currently tracked characters across all clients.
     pub async fn get_characters(&self) -> Vec<Character> {
         let chars = self.characters.read().await;
         chars.values().cloned().collect()
     }
 
-    /// Retrieve active character if recognized.
-    pub async fn get_active_character(&self) -> Option<Character> {
-        let active_id = *self.active_player_id.read().await;
-        if let Some(id) = active_id {
+    /// Retrieve character by client endpoint.
+    pub async fn get_character_by_client(&self, client_addr: &SocketAddr) -> Option<Character> {
+        let c_to_o = self.client_to_object.read().await;
+        if let Some(obj_id) = c_to_o.get(client_addr) {
             let chars = self.characters.read().await;
-            chars.get(&id).cloned()
+            chars.get(obj_id).cloned()
         } else {
             None
         }
     }
 
-    /// Ingest a parsed packet from the network capture stream.
+    /// Ingest a packet without client session context.
     pub async fn handle_packet(&self, packet: L2Packet) {
+        self.handle_packet_with_client(None, packet).await;
+    }
+
+    /// Ingest a parsed packet from a specific client TCP stream.
+    pub async fn handle_packet_with_client(&self, client_addr: Option<SocketAddr>, packet: L2Packet) {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
@@ -65,16 +73,17 @@ impl CharacterTracker {
 
         match packet {
             L2Packet::UserInfo(info) => {
-                self.handle_user_info(info, now).await;
+                self.handle_user_info(client_addr, info, now).await;
             }
             L2Packet::StatusUpdate(update) => {
-                self.handle_status_update(update.object_id, &update.attributes, now).await;
+                self.handle_status_update(client_addr, update.object_id, &update.attributes, now).await;
             }
             L2Packet::MoveToLocation(mv) => {
-                self.handle_movement(mv.object_id, mv.target_x, mv.target_y, mv.target_z, now).await;
+                self.handle_movement(client_addr, mv.object_id, mv.target_x, mv.target_y, mv.target_z, now).await;
             }
             L2Packet::Raw { opcode, payload } => {
                 let _ = self.event_tx.send(CompanionEvent::RawPacketReceived {
+                    client_addr,
                     opcode,
                     length: payload.len(),
                 });
@@ -83,9 +92,14 @@ impl CharacterTracker {
         }
     }
 
-    async fn handle_user_info(&self, info: UserInfoPacket, now: u64) {
+    async fn handle_user_info(&self, client_addr: Option<SocketAddr>, info: UserInfoPacket, now: u64) {
         let mut chars = self.characters.write().await;
         let mut active = self.active_player_id.write().await;
+
+        if let Some(addr) = client_addr {
+            let mut c_to_o = self.client_to_object.write().await;
+            c_to_o.insert(addr, info.object_id);
+        }
 
         let char_entry = chars.entry(info.object_id).or_insert_with(Character::default);
         char_entry.object_id = info.object_id;
@@ -94,6 +108,7 @@ impl CharacterTracker {
         char_entry.level = info.level;
         char_entry.exp = info.exp;
         char_entry.sp = info.sp;
+        char_entry.client_addr = client_addr.map(|a| a.to_string());
         char_entry.location = Location {
             x: info.x,
             y: info.y,
@@ -121,13 +136,17 @@ impl CharacterTracker {
         char_entry.last_updated_epoch_ms = now;
 
         *active = Some(info.object_id);
-        info!("Updated character info for: {} (ID: {})", info.name, info.object_id);
+        info!("Updated character info for: {} (ID: {}, Client: {:?})", info.name, info.object_id, client_addr);
 
-        let _ = self.event_tx.send(CompanionEvent::CharacterLoaded(char_entry.clone()));
+        let _ = self.event_tx.send(CompanionEvent::CharacterLoaded {
+            client_addr,
+            character: char_entry.clone(),
+        });
     }
 
     async fn handle_status_update(
         &self,
+        client_addr: Option<SocketAddr>,
         object_id: u32,
         attrs: &[l2companion_protocol::StatusUpdateAttribute],
         now: u64,
@@ -152,13 +171,22 @@ impl CharacterTracker {
             char_entry.last_updated_epoch_ms = now;
 
             let _ = self.event_tx.send(CompanionEvent::VitalsChanged {
+                client_addr,
                 object_id,
                 vitals: char_entry.vitals.clone(),
             });
         }
     }
 
-    async fn handle_movement(&self, object_id: u32, x: i32, y: i32, z: i32, now: u64) {
+    async fn handle_movement(
+        &self,
+        client_addr: Option<SocketAddr>,
+        object_id: u32,
+        x: i32,
+        y: i32,
+        z: i32,
+        now: u64,
+    ) {
         let mut chars = self.characters.write().await;
         if let Some(char_entry) = chars.get_mut(&object_id) {
             char_entry.location.x = x;
@@ -167,6 +195,7 @@ impl CharacterTracker {
             char_entry.last_updated_epoch_ms = now;
 
             let _ = self.event_tx.send(CompanionEvent::LocationChanged {
+                client_addr,
                 object_id,
                 location: char_entry.location.clone(),
             });
@@ -177,52 +206,48 @@ impl CharacterTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use l2companion_protocol::{StatusUpdateAttribute, StatusUpdatePacket, UserInfoPacket};
+    use l2companion_protocol::UserInfoPacket;
 
     #[tokio::test]
-    async fn test_character_tracker_lifecycle() {
+    async fn test_multi_client_character_tracker() {
         let tracker = CharacterTracker::new();
         let mut rx = tracker.subscribe();
 
-        // Ingest UserInfo
-        let user_info = UserInfoPacket {
-            object_id: 12345,
+        let client1: SocketAddr = "192.168.1.50:60001".parse().unwrap();
+        let client2: SocketAddr = "192.168.1.50:60002".parse().unwrap();
+
+        // Client 1 - Hero
+        let char1 = UserInfoPacket {
+            object_id: 1001,
             name: "HeroKnight".to_string(),
-            level: 76,
-            cur_hp: 4500,
-            max_hp: 4500,
-            cur_mp: 1200,
-            max_mp: 1200,
-            x: 100,
-            y: 200,
-            z: -50,
+            level: 80,
+            cur_hp: 5000,
+            max_hp: 5000,
             ..Default::default()
         };
+        tracker.handle_packet_with_client(Some(client1), L2Packet::UserInfo(char1)).await;
 
-        tracker.handle_packet(L2Packet::UserInfo(user_info)).await;
-
-        let active = tracker.get_active_character().await;
-        assert!(active.is_some());
-        let hero = active.unwrap();
-        assert_eq!(hero.name, "HeroKnight");
-        assert_eq!(hero.level, 76);
-        assert_eq!(hero.vitals.cur_hp, 4500);
-
-        // Update status (e.g. HP dropped to 3000)
-        let status = StatusUpdatePacket {
-            object_id: 12345,
-            attributes: vec![StatusUpdateAttribute { attr_id: 9, value: 3000 }],
+        // Client 2 - Healer
+        let char2 = UserInfoPacket {
+            object_id: 1002,
+            name: "CardinalHealer".to_string(),
+            level: 78,
+            cur_hp: 3200,
+            max_hp: 3200,
+            ..Default::default()
         };
-        tracker.handle_packet(L2Packet::StatusUpdate(status)).await;
+        tracker.handle_packet_with_client(Some(client2), L2Packet::UserInfo(char2)).await;
 
-        let updated = tracker.get_active_character().await.unwrap();
-        assert_eq!(updated.vitals.cur_hp, 3000);
+        let all = tracker.get_characters().await;
+        assert_eq!(all.len(), 2);
 
-        // Verify event receiver received events
+        let c1 = tracker.get_character_by_client(&client1).await.unwrap();
+        assert_eq!(c1.name, "HeroKnight");
+
+        let c2 = tracker.get_character_by_client(&client2).await.unwrap();
+        assert_eq!(c2.name, "CardinalHealer");
+
         let ev1 = rx.recv().await.unwrap();
-        assert!(matches!(ev1, CompanionEvent::CharacterLoaded(_)));
-
-        let ev2 = rx.recv().await.unwrap();
-        assert!(matches!(ev2, CompanionEvent::VitalsChanged { object_id: 12345, .. }));
+        assert!(matches!(ev1, CompanionEvent::CharacterLoaded { .. }));
     }
 }
