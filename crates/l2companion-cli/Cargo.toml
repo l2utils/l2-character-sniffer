@@ -1,0 +1,20 @@
+[package]
+name = "l2companion-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "l2companion"
+path = "src/main.rs"
+
+[dependencies]
+l2companion-service.workspace = true
+l2companion-capture.workspace = true
+l2companion-protocol.workspace = true
+tokio.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true

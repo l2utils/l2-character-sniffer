@@ -1,0 +1,15 @@
+[package]
+name = "l2companion-capture"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+l2companion-protocol.workspace = true
+pcap.workspace = true
+tokio.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+bytes.workspace = true
+serde.workspace = true

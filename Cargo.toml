@@ -1,0 +1,51 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/l2companion-protocol",
+    "crates/l2companion-capture",
+    "crates/l2companion-service",
+    "crates/l2companion-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Jason Yang"]
+license = "MIT"
+repository = "https://github.com/jason-yang/l2companion-core"
+
+[workspace.dependencies]
+# Internal crates
+l2companion-protocol = { path = "crates/l2companion-protocol" }
+l2companion-capture = { path = "crates/l2companion-capture" }
+l2companion-service = { path = "crates/l2companion-service" }
+
+# Async & Networking
+tokio = { version = "1.43", features = ["full"] }
+futures-util = "0.3"
+pcap = "2.2"
+
+# Serialization & Data
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+bytes = "1.10"
+byteorder = "1.5"
+
+# Cryptography & Utils
+blowfish = "0.9"
+cipher = "0.4"
+
+# Error handling & CLI
+thiserror = "2.0"
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+
+# Logging & Diagnostics
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "unwind"
