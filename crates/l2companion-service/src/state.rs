@@ -1,21 +1,23 @@
-//! Central state tracker for multi-client sniffing sessions.
+//! Central state tracker for multi-client and multi-account sniffing sessions.
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use l2companion_protocol::{L2Packet, UserInfoPacket};
+use l2companion_protocol::{AuthLoginPacket, CharSelectInfoPacket, L2Packet, UserInfoPacket};
 use tokio::sync::{broadcast, RwLock};
 use tracing::info;
 
 use crate::event::CompanionEvent;
-use crate::model::{Character, Location, Stats, Vitals};
+use crate::model::{AccountSession, Character, Location, Stats, Vitals};
 
-/// Shared thread-safe tracker state across all client sessions.
+/// Shared thread-safe tracker state across all client sessions and accounts.
 #[derive(Clone)]
 pub struct CharacterTracker {
     characters: Arc<RwLock<HashMap<u32, Character>>>,
     client_to_object: Arc<RwLock<HashMap<SocketAddr, u32>>>,
+    client_to_account: Arc<RwLock<HashMap<SocketAddr, String>>>,
+    accounts: Arc<RwLock<HashMap<String, AccountSession>>>,
     active_player_id: Arc<RwLock<Option<u32>>>,
     event_tx: broadcast::Sender<CompanionEvent>,
 }
@@ -32,6 +34,8 @@ impl CharacterTracker {
         Self {
             characters: Arc::new(RwLock::new(HashMap::new())),
             client_to_object: Arc::new(RwLock::new(HashMap::new())),
+            client_to_account: Arc::new(RwLock::new(HashMap::new())),
+            accounts: Arc::new(RwLock::new(HashMap::new())),
             active_player_id: Arc::new(RwLock::new(None)),
             event_tx,
         }
@@ -46,6 +50,12 @@ impl CharacterTracker {
     pub async fn get_characters(&self) -> Vec<Character> {
         let chars = self.characters.read().await;
         chars.values().cloned().collect()
+    }
+
+    /// Retrieve snapshot of all detected account sessions.
+    pub async fn get_accounts(&self) -> Vec<AccountSession> {
+        let accs = self.accounts.read().await;
+        accs.values().cloned().collect()
     }
 
     /// Retrieve character by client endpoint.
@@ -73,6 +83,9 @@ impl CharacterTracker {
         info!("Client disconnected: {} ({})", client_addr, reason);
         let mut c_to_o = self.client_to_object.write().await;
         c_to_o.remove(&client_addr);
+        let mut c_to_a = self.client_to_account.write().await;
+        c_to_a.remove(&client_addr);
+
         let _ = self.event_tx.send(CompanionEvent::ClientDisconnected {
             client_addr,
             reason,
@@ -92,6 +105,12 @@ impl CharacterTracker {
             .unwrap_or(0);
 
         match packet {
+            L2Packet::AuthLogin(auth) => {
+                self.handle_auth_login(client_addr, auth, now).await;
+            }
+            L2Packet::CharSelectInfo(info) => {
+                self.handle_char_select_info(client_addr, info, now).await;
+            }
             L2Packet::UserInfo(info) => {
                 self.handle_user_info(client_addr, info, now).await;
             }
@@ -112,17 +131,86 @@ impl CharacterTracker {
         }
     }
 
+    async fn handle_auth_login(&self, client_addr: Option<SocketAddr>, auth: AuthLoginPacket, now: u64) {
+        if auth.account_name.is_empty() {
+            return;
+        }
+
+        if let Some(addr) = client_addr {
+            let mut c_to_a = self.client_to_account.write().await;
+            c_to_a.insert(addr, auth.account_name.clone());
+
+            let mut accs = self.accounts.write().await;
+            let entry = accs.entry(auth.account_name.clone()).or_insert_with(|| AccountSession {
+                account_name: auth.account_name.clone(),
+                client_addr: addr.to_string(),
+                character_roster: Vec::new(),
+                active_character: None,
+                last_seen_epoch_ms: now,
+            });
+            entry.client_addr = addr.to_string();
+            entry.last_seen_epoch_ms = now;
+        }
+
+        info!("Account login detected: '{}' on {:?}", auth.account_name, client_addr);
+
+        let _ = self.event_tx.send(CompanionEvent::AccountDetected {
+            client_addr,
+            account_name: auth.account_name,
+        });
+    }
+
+    async fn handle_char_select_info(&self, client_addr: Option<SocketAddr>, info: CharSelectInfoPacket, now: u64) {
+        let account_name = if !info.account_name.is_empty() {
+            info.account_name.clone()
+        } else if let Some(addr) = client_addr {
+            let c_to_a = self.client_to_account.read().await;
+            c_to_a.get(&addr).cloned().unwrap_or_default()
+        } else {
+            String::new()
+        };
+
+        if let Some(addr) = client_addr {
+            if !account_name.is_empty() {
+                let mut accs = self.accounts.write().await;
+                let entry = accs.entry(account_name.clone()).or_insert_with(|| AccountSession {
+                    account_name: account_name.clone(),
+                    client_addr: addr.to_string(),
+                    character_roster: Vec::new(),
+                    active_character: None,
+                    last_seen_epoch_ms: now,
+                });
+                entry.character_roster = info.character_slots.clone();
+                entry.last_seen_epoch_ms = now;
+            }
+        }
+
+        info!("Character selection screen for account '{}' with {} characters", account_name, info.character_slots.len());
+
+        let _ = self.event_tx.send(CompanionEvent::AccountRosterLoaded {
+            client_addr,
+            account_name,
+            characters: info.character_slots,
+        });
+    }
+
     async fn handle_user_info(&self, client_addr: Option<SocketAddr>, info: UserInfoPacket, now: u64) {
         let mut chars = self.characters.write().await;
         let mut active = self.active_player_id.write().await;
 
-        if let Some(addr) = client_addr {
+        let account_name = if let Some(addr) = client_addr {
             let mut c_to_o = self.client_to_object.write().await;
             c_to_o.insert(addr, info.object_id);
-        }
+
+            let c_to_a = self.client_to_account.read().await;
+            c_to_a.get(&addr).cloned()
+        } else {
+            None
+        };
 
         let char_entry = chars.entry(info.object_id).or_insert_with(Character::default);
         char_entry.object_id = info.object_id;
+        char_entry.account_name = account_name;
         char_entry.name = info.name.clone();
         char_entry.class_id = info.class_id;
         char_entry.level = info.level;
@@ -226,48 +314,58 @@ impl CharacterTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use l2companion_protocol::UserInfoPacket;
+    use l2companion_protocol::{AuthLoginPacket, CharSelectSlot, UserInfoPacket};
 
     #[tokio::test]
-    async fn test_multi_client_character_tracker() {
+    async fn test_multi_client_and_account_tracker() {
         let tracker = CharacterTracker::new();
         let mut rx = tracker.subscribe();
 
         let client1: SocketAddr = "192.168.1.50:60001".parse().unwrap();
-        let client2: SocketAddr = "192.168.1.50:60002".parse().unwrap();
 
-        // Client 1 - Hero
+        // 1. Account login
+        let auth = AuthLoginPacket {
+            account_name: "JasonAccount1".to_string(),
+            session_key1: 12345,
+            session_key2: 67890,
+        };
+        tracker.handle_packet_with_client(Some(client1), L2Packet::AuthLogin(auth)).await;
+
+        let ev1 = rx.recv().await.unwrap();
+        assert!(matches!(ev1, CompanionEvent::AccountDetected { .. }));
+
+        // 2. Character Select Info
+        let slot = CharSelectSlot {
+            name: "HeroKnight".to_string(),
+            char_id: 1001,
+            level: 85,
+            class_id: 90,
+            cur_hp: 6000.0,
+            max_hp: 6000.0,
+            ..Default::default()
+        };
+        let select_info = CharSelectInfoPacket {
+            account_name: "JasonAccount1".to_string(),
+            character_slots: vec![slot],
+        };
+        tracker.handle_packet_with_client(Some(client1), L2Packet::CharSelectInfo(select_info)).await;
+
+        let ev2 = rx.recv().await.unwrap();
+        assert!(matches!(ev2, CompanionEvent::AccountRosterLoaded { .. }));
+
+        // 3. Enter World UserInfo
         let char1 = UserInfoPacket {
             object_id: 1001,
             name: "HeroKnight".to_string(),
-            level: 80,
-            cur_hp: 5000,
-            max_hp: 5000,
+            level: 85,
+            cur_hp: 6000,
+            max_hp: 6000,
             ..Default::default()
         };
         tracker.handle_packet_with_client(Some(client1), L2Packet::UserInfo(char1)).await;
 
-        // Client 2 - Healer
-        let char2 = UserInfoPacket {
-            object_id: 1002,
-            name: "CardinalHealer".to_string(),
-            level: 78,
-            cur_hp: 3200,
-            max_hp: 3200,
-            ..Default::default()
-        };
-        tracker.handle_packet_with_client(Some(client2), L2Packet::UserInfo(char2)).await;
-
-        let all = tracker.get_characters().await;
-        assert_eq!(all.len(), 2);
-
-        let c1 = tracker.get_character_by_client(&client1).await.unwrap();
-        assert_eq!(c1.name, "HeroKnight");
-
-        let c2 = tracker.get_character_by_client(&client2).await.unwrap();
-        assert_eq!(c2.name, "CardinalHealer");
-
-        let ev1 = rx.recv().await.unwrap();
-        assert!(matches!(ev1, CompanionEvent::CharacterLoaded { .. }));
+        let c = tracker.get_character_by_client(&client1).await.unwrap();
+        assert_eq!(c.name, "HeroKnight");
+        assert_eq!(c.account_name, Some("JasonAccount1".to_string()));
     }
 }

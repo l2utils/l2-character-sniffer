@@ -59,7 +59,9 @@ pub struct ClientStream {
     pub client_addr: SocketAddr,
     pub server_addr: SocketAddr,
     pub rx_buffer: BytesMut,
-    pub codec: L2FrameCodec,
+    pub tx_buffer: BytesMut,
+    pub rx_codec: L2FrameCodec,
+    pub tx_codec: L2FrameCodec,
     pub packet_count: u64,
 }
 
@@ -69,7 +71,9 @@ impl ClientStream {
             client_addr,
             server_addr,
             rx_buffer: BytesMut::with_capacity(65535),
-            codec: L2FrameCodec::default(),
+            tx_buffer: BytesMut::with_capacity(65535),
+            rx_codec: L2FrameCodec::default(),
+            tx_codec: L2FrameCodec::default(),
             packet_count: 0,
         }
     }
@@ -81,7 +85,7 @@ impl ClientStream {
     ) {
         self.rx_buffer.extend_from_slice(payload);
 
-        while let Ok(Some(frame)) = self.codec.decode(&mut self.rx_buffer) {
+        while let Ok(Some(frame)) = self.rx_codec.decode(&mut self.rx_buffer) {
             if !frame.is_empty() {
                 self.packet_count += 1;
                 let opcode = frame[0];
@@ -91,6 +95,30 @@ impl ClientStream {
                     client_addr: self.client_addr,
                     server_addr: self.server_addr,
                     direction: PacketDirection::ServerToClient,
+                    packet: parsed,
+                };
+                let _ = tx.blocking_send(SessionMessage::Packet(session_packet));
+            }
+        }
+    }
+
+    pub fn ingest_client_payload(
+        &mut self,
+        payload: &[u8],
+        tx: &mpsc::Sender<SessionMessage>,
+    ) {
+        self.tx_buffer.extend_from_slice(payload);
+
+        while let Ok(Some(frame)) = self.tx_codec.decode(&mut self.tx_buffer) {
+            if !frame.is_empty() {
+                self.packet_count += 1;
+                let opcode = frame[0];
+                let parsed = L2Packet::parse_client(opcode, &frame[1..]);
+
+                let session_packet = SessionPacket {
+                    client_addr: self.client_addr,
+                    server_addr: self.server_addr,
+                    direction: PacketDirection::ClientToServer,
                     packet: parsed,
                 };
                 let _ = tx.blocking_send(SessionMessage::Packet(session_packet));
@@ -344,11 +372,15 @@ impl CaptureSession {
             });
         }
 
-        // Process server -> client payload if present
-        if is_server_to_client && raw.len() > total_header_len {
+        // Process payloads
+        if raw.len() > total_header_len {
             let payload = &raw[total_header_len..];
             if let Some(stream) = streams.get_mut(&client_addr) {
-                stream.ingest_server_payload(payload, tx);
+                if is_server_to_client {
+                    stream.ingest_server_payload(payload, tx);
+                } else {
+                    stream.ingest_client_payload(payload, tx);
+                }
             }
         }
     }

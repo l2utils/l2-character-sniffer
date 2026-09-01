@@ -4,12 +4,14 @@ use byteorder::{LittleEndian, ReadBytesExt};
 use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 
-use crate::opcode::ServerOpcode;
+use crate::opcode::{ClientOpcode, ServerOpcode};
 
 /// Parsed Lineage 2 packet enum.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
 pub enum L2Packet {
+    AuthLogin(AuthLoginPacket),
+    CharSelectInfo(CharSelectInfoPacket),
     UserInfo(UserInfoPacket),
     StatusUpdate(StatusUpdatePacket),
     ItemList(ItemListPacket),
@@ -20,6 +22,36 @@ pub enum L2Packet {
         #[serde(skip_serializing)]
         payload: Vec<u8>,
     },
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct AuthLoginPacket {
+    pub account_name: String,
+    pub session_key1: u32,
+    pub session_key2: u32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct CharSelectSlot {
+    pub name: String,
+    pub char_id: u32,
+    pub level: u32,
+    pub class_id: u32,
+    pub cur_hp: f64,
+    pub max_hp: f64,
+    pub cur_mp: f64,
+    pub max_mp: f64,
+    pub sp: u32,
+    pub exp: u64,
+    pub karma: u32,
+    pub pk_kills: u32,
+    pub pvp_kills: u32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct CharSelectInfoPacket {
+    pub account_name: String,
+    pub character_slots: Vec<CharSelectSlot>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -101,12 +133,18 @@ pub struct SystemMessagePacket {
 }
 
 impl L2Packet {
-    /// Parses a raw decrypted packet payload (starting with opcode).
+    /// Parses a raw server-to-client or client-to-server decrypted payload.
     pub fn parse(opcode: u8, payload: &[u8]) -> Self {
         let mut cursor = Cursor::new(payload);
         match ServerOpcode::from(opcode) {
             ServerOpcode::UserInfo => Self::parse_user_info(&mut cursor)
                 .map(L2Packet::UserInfo)
+                .unwrap_or(L2Packet::Raw {
+                    opcode,
+                    payload: payload.to_vec(),
+                }),
+            ServerOpcode::CharSelectInfo => Self::parse_char_select_info(&mut cursor)
+                .map(L2Packet::CharSelectInfo)
                 .unwrap_or(L2Packet::Raw {
                     opcode,
                     payload: payload.to_vec(),
@@ -128,6 +166,99 @@ impl L2Packet {
                 payload: payload.to_vec(),
             },
         }
+    }
+
+    /// Parses client-to-server packets (e.g. AuthLogin).
+    pub fn parse_client(opcode: u8, payload: &[u8]) -> Self {
+        let mut cursor = Cursor::new(payload);
+        match ClientOpcode::from(opcode) {
+            ClientOpcode::AuthLogin => Self::parse_auth_login(&mut cursor)
+                .map(L2Packet::AuthLogin)
+                .unwrap_or(L2Packet::Raw {
+                    opcode,
+                    payload: payload.to_vec(),
+                }),
+            _ => L2Packet::Raw {
+                opcode,
+                payload: payload.to_vec(),
+            },
+        }
+    }
+
+    fn parse_auth_login(r: &mut Cursor<&[u8]>) -> Result<AuthLoginPacket, std::io::Error> {
+        // Try reading null-terminated UTF-16 string or ASCII string
+        let account_name = if let Ok(s) = read_l2_string(r) {
+            if !s.is_empty() && s.chars().all(|c| c.is_ascii_graphic() || c.is_ascii_whitespace()) {
+                s
+            } else {
+                read_ascii_string(r)?
+            }
+        } else {
+            read_ascii_string(r)?
+        };
+
+        let session_key1 = r.read_u32::<LittleEndian>().unwrap_or_default();
+        let session_key2 = r.read_u32::<LittleEndian>().unwrap_or_default();
+
+        Ok(AuthLoginPacket {
+            account_name,
+            session_key1,
+            session_key2,
+        })
+    }
+
+    fn parse_char_select_info(r: &mut Cursor<&[u8]>) -> Result<CharSelectInfoPacket, std::io::Error> {
+        let count = r.read_u32::<LittleEndian>()?;
+        let _max_slots = r.read_u32::<LittleEndian>().unwrap_or_default();
+        let _active = r.read_u8().unwrap_or_default();
+
+        let mut character_slots = Vec::with_capacity(count as usize);
+
+        for _ in 0..count {
+            if let Ok(name) = read_l2_string(r) {
+                let char_id = r.read_u32::<LittleEndian>().unwrap_or_default();
+                let _login_name = read_l2_string(r).unwrap_or_default();
+                let _session_id = r.read_u32::<LittleEndian>().unwrap_or_default();
+                let _clan_id = r.read_u32::<LittleEndian>().unwrap_or_default();
+                let _builder = r.read_u32::<LittleEndian>().unwrap_or_default();
+                let _sex = r.read_u32::<LittleEndian>().unwrap_or_default();
+                let _race = r.read_u32::<LittleEndian>().unwrap_or_default();
+                let class_id = r.read_u32::<LittleEndian>().unwrap_or_default();
+                let _active_flag = r.read_u32::<LittleEndian>().unwrap_or_default();
+                let _x = r.read_i32::<LittleEndian>().unwrap_or_default();
+                let _y = r.read_i32::<LittleEndian>().unwrap_or_default();
+                let _z = r.read_i32::<LittleEndian>().unwrap_or_default();
+                let cur_hp = r.read_f64::<LittleEndian>().unwrap_or_default();
+                let cur_mp = r.read_f64::<LittleEndian>().unwrap_or_default();
+                let sp = r.read_u32::<LittleEndian>().unwrap_or_default();
+                let exp = r.read_u64::<LittleEndian>().unwrap_or_default();
+                let level = r.read_u32::<LittleEndian>().unwrap_or_default();
+                let karma = r.read_u32::<LittleEndian>().unwrap_or_default();
+                let pk_kills = r.read_u32::<LittleEndian>().unwrap_or_default();
+                let pvp_kills = r.read_u32::<LittleEndian>().unwrap_or_default();
+
+                character_slots.push(CharSelectSlot {
+                    name,
+                    char_id,
+                    level,
+                    class_id,
+                    cur_hp,
+                    max_hp: cur_hp,
+                    cur_mp,
+                    max_mp: cur_mp,
+                    sp,
+                    exp,
+                    karma,
+                    pk_kills,
+                    pvp_kills,
+                });
+            }
+        }
+
+        Ok(CharSelectInfoPacket {
+            account_name: String::new(),
+            character_slots,
+        })
     }
 
     fn parse_user_info(r: &mut Cursor<&[u8]>) -> Result<UserInfoPacket, std::io::Error> {
@@ -212,4 +343,22 @@ pub fn read_l2_string(r: &mut Cursor<&[u8]>) -> Result<String, std::io::Error> {
         }
     }
     String::from_utf16(&u16_chars).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+}
+
+/// Reads an ASCII null-terminated string.
+pub fn read_ascii_string(r: &mut Cursor<&[u8]>) -> Result<String, std::io::Error> {
+    let mut bytes = Vec::new();
+    loop {
+        match r.read_u8() {
+            Ok(0) => break,
+            Ok(b) => bytes.push(b),
+            Err(e) => {
+                if bytes.is_empty() {
+                    return Err(e);
+                }
+                break;
+            }
+        }
+    }
+    String::from_utf8(bytes).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
 }

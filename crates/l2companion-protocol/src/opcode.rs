@@ -14,6 +14,7 @@ pub enum ServerOpcode {
     ItemAction,
     GetItem,
     StatusUpdate,
+    CharSelectInfo,
     NpcInfo,
     ItemList,
     TargetSelected,
@@ -40,6 +41,21 @@ pub enum ServerOpcode {
     Unknown(u8),
 }
 
+/// Known Client-to-Server packet opcodes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ClientOpcode {
+    ProtocolVersion,
+    AuthLogin,
+    CharacterSelect,
+    RequestEnterWorld,
+    RequestRestart,
+    Action,
+    MoveBackwardToLocation,
+    UseItem,
+    Say2,
+    Unknown(u8),
+}
+
 impl From<u8> for ServerOpcode {
     fn from(op: u8) -> Self {
         match op {
@@ -49,11 +65,13 @@ impl From<u8> for ServerOpcode {
             0x04 => ServerOpcode::UserInfo,
             0x05 => ServerOpcode::Attack,
             0x08 => ServerOpcode::DeleteObject,
+            0x09 => ServerOpcode::CharSelectInfo,
             0x0c => ServerOpcode::ItemAction,
             0x0d => ServerOpcode::GetItem,
             0x0e => ServerOpcode::StatusUpdate,
             0x16 => ServerOpcode::NpcInfo,
             0x1b => ServerOpcode::ItemList,
+            0x1f => ServerOpcode::CharSelectInfo,
             0x23 => ServerOpcode::TargetSelected,
             0x24 => ServerOpcode::TargetUnselected,
             0x25 => ServerOpcode::AutoAttackStart,
@@ -78,42 +96,19 @@ impl From<u8> for ServerOpcode {
     }
 }
 
-impl From<ServerOpcode> for u8 {
-    fn from(op: ServerOpcode) -> Self {
+impl From<u8> for ClientOpcode {
+    fn from(op: u8) -> Self {
         match op {
-            ServerOpcode::Die => 0x00,
-            ServerOpcode::MoveToLocation => 0x01,
-            ServerOpcode::Revive => 0x01,
-            ServerOpcode::CharInfo => 0x03,
-            ServerOpcode::UserInfo => 0x04,
-            ServerOpcode::Attack => 0x05,
-            ServerOpcode::DeleteObject => 0x08,
-            ServerOpcode::ItemAction => 0x0c,
-            ServerOpcode::GetItem => 0x0d,
-            ServerOpcode::StatusUpdate => 0x0e,
-            ServerOpcode::NpcInfo => 0x16,
-            ServerOpcode::ItemList => 0x1b,
-            ServerOpcode::TargetSelected => 0x23,
-            ServerOpcode::TargetUnselected => 0x24,
-            ServerOpcode::AutoAttackStart => 0x25,
-            ServerOpcode::AutoAttackStop => 0x26,
-            ServerOpcode::ChangeMoveType => 0x28,
-            ServerOpcode::ChangeWaitType => 0x29,
-            ServerOpcode::StopMove => 0x47,
-            ServerOpcode::MagicSkillUse => 0x48,
-            ServerOpcode::MagicSkillCanceled => 0x49,
-            ServerOpcode::CreatureSay => 0x4a,
-            ServerOpcode::EquipUpdate => 0x4b,
-            ServerOpcode::PartySmallWindowAll => 0x4e,
-            ServerOpcode::PartySmallWindowAdd => 0x4f,
-            ServerOpcode::PartySmallWindowDelete => 0x50,
-            ServerOpcode::PartySmallWindowUpdate => 0x51,
-            ServerOpcode::SkillList => 0x58,
-            ServerOpcode::ValidateLocation => 0x61,
-            ServerOpcode::SystemMessage => 0x64,
-            ServerOpcode::RestartResponse => 0x6f,
-            ServerOpcode::KeyPacket => 0x00,
-            ServerOpcode::Unknown(val) => val,
+            0x00 => ClientOpcode::ProtocolVersion,
+            0x08 => ClientOpcode::AuthLogin,
+            0x0d => ClientOpcode::CharacterSelect,
+            0x03 => ClientOpcode::RequestEnterWorld,
+            0x2b => ClientOpcode::AuthLogin,
+            0x04 => ClientOpcode::Action,
+            0x0f => ClientOpcode::MoveBackwardToLocation,
+            0x19 => ClientOpcode::UseItem,
+            0x49 => ClientOpcode::Say2,
+            other => ClientOpcode::Unknown(other),
         }
     }
 }

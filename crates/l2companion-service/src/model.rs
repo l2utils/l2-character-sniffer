@@ -1,6 +1,7 @@
-//! Character domain models and telemetry data structures.
+//! Character and Account domain models and telemetry data structures.
 
 use serde::{Deserialize, Serialize};
+pub use l2companion_protocol::CharSelectSlot;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Location {
@@ -46,6 +47,7 @@ pub struct InventoryItem {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Character {
     pub object_id: u32,
+    pub account_name: Option<String>,
     pub name: String,
     pub title: String,
     pub class_id: u32,
@@ -61,4 +63,13 @@ pub struct Character {
     pub inventory: Vec<InventoryItem>,
     pub client_addr: Option<String>,
     pub last_updated_epoch_ms: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct AccountSession {
+    pub account_name: String,
+    pub client_addr: String,
+    pub character_roster: Vec<CharSelectSlot>,
+    pub active_character: Option<String>,
+    pub last_seen_epoch_ms: u64,
 }
