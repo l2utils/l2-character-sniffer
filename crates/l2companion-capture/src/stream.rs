@@ -1,10 +1,10 @@
-//! Packet capture engine with multi-client TCP stream demuxing.
+//! Packet capture engine with multi-client TCP stream demuxing and dynamic decryption.
 
 use std::collections::HashMap;
 use std::fs::File;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use bytes::BytesMut;
-use l2companion_protocol::{L2FrameCodec, L2Packet};
+use l2companion_protocol::{L2Cryptor, L2FrameCodec, L2Packet};
 use pcap::Capture;
 use pcap_file::pcapng::PcapNgReader;
 use pcap_file::pcap::PcapReader;
@@ -62,6 +62,8 @@ pub struct ClientStream {
     pub tx_buffer: BytesMut,
     pub rx_codec: L2FrameCodec,
     pub tx_codec: L2FrameCodec,
+    pub in_cryptor: L2Cryptor,
+    pub out_cryptor: L2Cryptor,
     pub packet_count: u64,
 }
 
@@ -74,6 +76,8 @@ impl ClientStream {
             tx_buffer: BytesMut::with_capacity(65535),
             rx_codec: L2FrameCodec::default(),
             tx_codec: L2FrameCodec::default(),
+            in_cryptor: L2Cryptor::new(),
+            out_cryptor: L2Cryptor::new(),
             packet_count: 0,
         }
     }
@@ -85,9 +89,36 @@ impl ClientStream {
     ) {
         self.rx_buffer.extend_from_slice(payload);
 
-        while let Ok(Some(frame)) = self.rx_codec.decode(&mut self.rx_buffer) {
+        while let Ok(Some(mut frame)) = self.rx_codec.decode(&mut self.rx_buffer) {
             if !frame.is_empty() {
                 self.packet_count += 1;
+
+                // Check for unencrypted KeyPacket / VersionCheck (Server Opcode 0x2E / 0x00)
+                if !self.out_cryptor.is_initialized() {
+                    let opcode = frame[0];
+                    if (opcode == 0x2e || opcode == 0x00) && frame.len() >= 10 {
+                        // Key packet contains enable_crypt flag and 8-byte key seed
+                        let enable_crypt = frame[1];
+                        if enable_crypt == 1 {
+                            let key_seed = &frame[2..10];
+                            self.in_cryptor.set_key(key_seed);
+                            self.out_cryptor.set_key(key_seed);
+                            info!("Captured Lineage 2 encryption key for client {}: {:02X?}", self.client_addr, key_seed);
+                        }
+                    }
+                    let parsed = L2Packet::parse(opcode, &frame[1..]);
+                    let session_packet = SessionPacket {
+                        client_addr: self.client_addr,
+                        server_addr: self.server_addr,
+                        direction: PacketDirection::ServerToClient,
+                        packet: parsed,
+                    };
+                    let _ = tx.blocking_send(SessionMessage::Packet(session_packet));
+                    continue;
+                }
+
+                // Decrypt server-to-client packet
+                let _ = self.out_cryptor.decrypt(&mut frame);
                 let opcode = frame[0];
                 let parsed = L2Packet::parse(opcode, &frame[1..]);
 
@@ -109,9 +140,14 @@ impl ClientStream {
     ) {
         self.tx_buffer.extend_from_slice(payload);
 
-        while let Ok(Some(frame)) = self.tx_codec.decode(&mut self.tx_buffer) {
+        while let Ok(Some(mut frame)) = self.tx_codec.decode(&mut self.tx_buffer) {
             if !frame.is_empty() {
                 self.packet_count += 1;
+
+                if self.in_cryptor.is_initialized() {
+                    let _ = self.in_cryptor.decrypt(&mut frame);
+                }
+
                 let opcode = frame[0];
                 let parsed = L2Packet::parse_client(opcode, &frame[1..]);
 
@@ -142,6 +178,7 @@ impl Default for CaptureBuilder {
         Self {
             device_name: None,
             pcap_file: None,
+            // Game server (7777) and login server (2106)
             bpf_filter: "tcp port 7777 or tcp port 2106".to_string(),
             snaplen: 65535,
             promiscuous: true,
@@ -385,3 +422,46 @@ impl CaptureSession {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_inspect_character_and_roster_packets() {
+        let (tx, mut rx) = mpsc::channel(1024);
+        let path = if std::path::Path::new("captures/l2-login-single.pcapng").exists() {
+            "captures/l2-login-single.pcapng"
+        } else {
+            "../../captures/l2-login-single.pcapng"
+        };
+        let session = CaptureBuilder::new()
+            .pcap_file(path)
+            .build()
+            .unwrap();
+
+        let handle = session.spawn_worker(tx);
+        while let Some(msg) = rx.recv().await {
+            if let SessionMessage::Packet(sp) = msg {
+                match sp.packet {
+                    L2Packet::AuthLogin(ref a) => {
+                        println!("\n=== [TEST] AuthLogin: Acc='{}' ===", a.account_name);
+                    }
+                    L2Packet::CharSelectInfo(ref cs) => {
+                        println!("\n=== [TEST] CharSelectInfo: Acc='{}' ({} slots) ===", cs.account_name, cs.character_slots.len());
+                        for (i, s) in cs.character_slots.iter().enumerate() {
+                            println!("  Slot {}: Name='{}', Lvl={}, Class={}, HP={:.0}", i+1, s.name, s.level, s.class_id, s.cur_hp);
+                        }
+                    }
+                    L2Packet::UserInfo(ref u) => {
+                        println!("\n=== [TEST] UserInfo: Name='{}', Lvl={}, Class={}, HP={}/{} ===",
+                            u.name, u.level, u.class_id, u.cur_hp, u.max_hp);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let _ = handle.await;
+    }
+}
+

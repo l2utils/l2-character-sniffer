@@ -26,11 +26,17 @@ impl L2Cryptor {
         }
     }
 
-    /// Sets the dynamic 8 or 16-byte key received in the `KeyPacket` (initial packet exchange).
+    /// Sets the dynamic 8 or 16-byte key received in the `KeyPacket` / `VersionCheck` (opcode 0x2E).
     pub fn set_key(&mut self, initial_key: &[u8]) {
-        let len = initial_key.len().min(16);
-        self.key[..len].copy_from_slice(&initial_key[..len]);
-        self.initialized = true;
+        if initial_key.len() >= 8 {
+            self.key[..8].copy_from_slice(&initial_key[..8]);
+            // Standard Lineage 2 static key tail constant
+            self.key[8..16].copy_from_slice(&[0xc8, 0x27, 0x93, 0x01, 0xa1, 0x6c, 0x31, 0x97]);
+            self.initialized = true;
+        } else if initial_key.len() == 16 {
+            self.key.copy_from_slice(initial_key);
+            self.initialized = true;
+        }
     }
 
     /// Returns whether the cryptor is initialized with a key.
@@ -44,25 +50,11 @@ impl L2Cryptor {
             return Ok(());
         }
 
-        // L2 XOR / Blowfish stream decryption
-        let mut temp = 0u32;
-        let mut key_offset = 0usize;
-
-        for chunk in raw_data.chunks_mut(4) {
-            if chunk.len() == 4 {
-                let current = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
-                let key_part = u32::from_le_bytes([
-                    self.key[key_offset % 16],
-                    self.key[(key_offset + 1) % 16],
-                    self.key[(key_offset + 2) % 16],
-                    self.key[(key_offset + 3) % 16],
-                ]);
-
-                let decrypted = current ^ key_part ^ temp;
-                temp = current;
-                chunk.copy_from_slice(&decrypted.to_le_bytes());
-                key_offset += 4;
-            }
+        let mut temp = 0u8;
+        for (i, byte) in raw_data.iter_mut().enumerate() {
+            let temp2 = *byte;
+            *byte = temp2 ^ self.key[i & 15] ^ temp;
+            temp = temp2;
         }
 
         // Advance the dynamic key
@@ -93,15 +85,11 @@ mod tests {
     #[test]
     fn test_cryptor_init_and_decrypt() {
         let mut cryptor = L2Cryptor::new();
-        assert!(!cryptor.is_initialized());
+        let key_seed = [0x34, 0x67, 0xc4, 0x56, 0xe8, 0x76, 0x22, 0xd9];
+        cryptor.set_key(&key_seed);
 
-        let key = [0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88];
-        cryptor.set_key(&key);
-        assert!(cryptor.is_initialized());
-
-        let mut data = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08];
-        let original = data;
+        let mut data = vec![0xca, 0xa0, 0x67, 0x31, 0xd8, 0xba, 0x98, 0x41, 0x89, 0xae, 0xc3, 0x3d, 0x63, 0xf0];
         cryptor.decrypt(&mut data).unwrap();
-        assert_ne!(data, original);
+        assert_eq!(data[0], 0xfe);
     }
 }

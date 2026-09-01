@@ -167,23 +167,35 @@ async fn run_capture_session(
                 }
                 CompanionEvent::AccountRosterLoaded { client_addr, account_name, characters } => {
                     let client_str = client_addr.map(|a| a.to_string()).unwrap_or_else(|| "-".into());
-                    println!("📋 [ACCOUNT ROSTER]      Account: \"{}\" [{}] ({} characters):", account_name, client_str, characters.len());
+                    println!("\n📋 [ACCOUNT ROSTER] Account: \"{}\" [{}] ({} characters):", account_name, client_str, characters.len());
+                    println!("┌──────┬────────────────┬───────┬──────────┬───────────────┬─────────┬──────────────┬────────────┬──────┬──────────────────┐");
+                    println!("│ Slot │ Name           │ Level │ Class ID │ HP (Cur/Max)  │ EXP %   │ SP           │ Reputation │ VP   │ Last Login       │");
+                    println!("├──────┼────────────────┼───────┼──────────┼───────────────┼─────────┼──────────────┼────────────┼──────┼──────────────────┤");
                     for (i, c) in characters.iter().enumerate() {
-                        let is_last = i == characters.len() - 1;
-                        let branch = if is_last { "└─" } else { "├─" };
-                        println!("   {} Slot {}: {:<16} | Level: {:<2} | Class ID: {:<3} | HP: {:.0}",
-                            branch, i + 1, c.name, c.level, c.class_id, c.cur_hp);
+                        let hp_str = format!("{:.0}/{:.0}", c.cur_hp, c.max_hp);
+                        let exp_str = format!("{:>6.2}%", c.exp_percent);
+                        let sp_str = format_number(c.sp);
+                        let rep_str = format!("{}", c.reputation);
+                        let vp_str = format!("{}%", c.vitality);
+                        let last_login_str = if c.last_access > 0 {
+                            format_unix_timestamp(c.last_access)
+                        } else {
+                            "-".into()
+                        };
+                        println!("│ {:<4} │ {:<14} │ {:<5} │ {:<8} │ {:<13} │ {:<7} │ {:<12} │ {:<10} │ {:<4} │ {:<16} │",
+                            i + 1, c.name, c.level, c.class_id, hp_str, exp_str, sp_str, rep_str, vp_str, last_login_str);
                     }
+                    println!("└──────┴────────────────┴───────┴──────────┴───────────────┴─────────┴──────────────┴────────────┴──────┴──────────────────┘\n");
                 }
                 CompanionEvent::CharacterLoaded { client_addr, character } => {
                     let client_str = client_addr.map(|a| a.to_string()).unwrap_or_else(|| "Unknown".into());
                     let acc_str = character.account_name.as_deref().map(|a| format!("Account: \"{}\" | ", a)).unwrap_or_default();
-                    println!("[CHARACTER] Client: {:<21} | {}Name: {:<16} | Level: {:<3} | Class: {:<3} | HP: {}/{}",
+                    println!("👤 [CHARACTER] Client: {:<21} | {}Name: {:<16} | Level: {:<3} | Class ID: {:<3} | HP: {}/{}",
                         client_str, acc_str, character.name, character.level, character.class_id, character.vitals.cur_hp, character.vitals.max_hp);
                 }
                 CompanionEvent::VitalsChanged { client_addr, object_id, vitals } => {
                     let client_str = client_addr.map(|a| a.to_string()).unwrap_or_else(|| "-".into());
-                    println!("[VITALS]    Client: {:<21} | Obj {}: HP: {}/{} | MP: {}/{}",
+                    println!("❤️ [VITALS]    Client: {:<21} | Obj {}: HP: {}/{} | MP: {}/{}",
                         client_str, object_id, vitals.cur_hp, vitals.max_hp, vitals.cur_mp, vitals.max_mp);
                 }
                 _ => {}
@@ -221,4 +233,48 @@ async fn run_capture_session(
     println!("====================================================\n");
 
     Ok(())
+}
+
+fn format_unix_timestamp(ts: u32) -> String {
+    if ts == 0 {
+        return "-".into();
+    }
+    let min = (ts / 60) % 60;
+    let hour = (ts / 3600) % 24;
+    let mut days = ts / 86400;
+
+    let mut year = 1970;
+    loop {
+        let leap = if (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0) { 1 } else { 0 };
+        let days_in_year = 365 + leap;
+        if days < days_in_year {
+            let month_days = [31, 28 + leap, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+            let mut month = 1;
+            for md in month_days {
+                if days < md {
+                    let day = days + 1;
+                    return format!("{:04}/{:02}/{:02} {:02}:{:02}", year, month, day, hour, min);
+                }
+                days -= md;
+                month += 1;
+            }
+            break;
+        }
+        days -= days_in_year;
+        year += 1;
+    }
+    format!("{ts}")
+}
+
+fn format_number(n: u64) -> String {
+    let s = n.to_string();
+    let mut out = String::new();
+    let chars: Vec<_> = s.chars().collect();
+    for (i, c) in chars.iter().enumerate() {
+        if i > 0 && (chars.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(*c);
+    }
+    out
 }

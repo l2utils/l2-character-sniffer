@@ -9,7 +9,7 @@ use tokio::sync::{broadcast, RwLock};
 use tracing::info;
 
 use crate::event::CompanionEvent;
-use crate::model::{AccountSession, Character, Location, Stats, Vitals};
+use crate::model::{AccountSession, Character, Location};
 
 /// Shared thread-safe tracker state across all client sessions and accounts.
 #[derive(Clone)]
@@ -161,31 +161,37 @@ impl CharacterTracker {
     }
 
     async fn handle_char_select_info(&self, client_addr: Option<SocketAddr>, info: CharSelectInfoPacket, now: u64) {
+        if info.character_slots.is_empty() {
+            return;
+        }
+
         let account_name = if !info.account_name.is_empty() {
             info.account_name.clone()
         } else if let Some(addr) = client_addr {
             let c_to_a = self.client_to_account.read().await;
-            c_to_a.get(&addr).cloned().unwrap_or_default()
+            c_to_a.get(&addr).cloned().unwrap_or_else(|| "GameAccount".into())
         } else {
-            String::new()
+            "GameAccount".into()
         };
 
         if let Some(addr) = client_addr {
-            if !account_name.is_empty() {
-                let mut accs = self.accounts.write().await;
-                let entry = accs.entry(account_name.clone()).or_insert_with(|| AccountSession {
-                    account_name: account_name.clone(),
-                    client_addr: addr.to_string(),
-                    character_roster: Vec::new(),
-                    active_character: None,
-                    last_seen_epoch_ms: now,
-                });
-                entry.character_roster = info.character_slots.clone();
-                entry.last_seen_epoch_ms = now;
+            if !info.account_name.is_empty() {
+                let mut c_to_a = self.client_to_account.write().await;
+                c_to_a.insert(addr, info.account_name.clone());
             }
+            let mut accs = self.accounts.write().await;
+            let entry = accs.entry(account_name.clone()).or_insert_with(|| AccountSession {
+                account_name: account_name.clone(),
+                client_addr: addr.to_string(),
+                character_roster: Vec::new(),
+                active_character: None,
+                last_seen_epoch_ms: now,
+            });
+            entry.character_roster = info.character_slots.clone();
+            entry.last_seen_epoch_ms = now;
         }
 
-        info!("Character selection screen for account '{}' with {} characters", account_name, info.character_slots.len());
+        info!("Character roster for account '{}' with {} characters", account_name, info.character_slots.len());
 
         let _ = self.event_tx.send(CompanionEvent::AccountRosterLoaded {
             client_addr,
@@ -195,6 +201,10 @@ impl CharacterTracker {
     }
 
     async fn handle_user_info(&self, client_addr: Option<SocketAddr>, info: UserInfoPacket, now: u64) {
+        if info.name.is_empty() {
+            return;
+        }
+
         let mut chars = self.characters.write().await;
         let mut active = self.active_player_id.write().await;
 
@@ -202,7 +212,15 @@ impl CharacterTracker {
             let mut c_to_o = self.client_to_object.write().await;
             c_to_o.insert(addr, info.object_id);
 
-            let c_to_a = self.client_to_account.read().await;
+            let mut c_to_a = self.client_to_account.write().await;
+            if info.session_id > 0 && !c_to_a.contains_key(&addr) {
+                let acc_id = format!("#{}", info.session_id);
+                c_to_a.insert(addr, acc_id.clone());
+                let _ = self.event_tx.send(CompanionEvent::AccountDetected {
+                    client_addr,
+                    account_name: acc_id,
+                });
+            }
             c_to_a.get(&addr).cloned()
         } else {
             None
@@ -212,10 +230,10 @@ impl CharacterTracker {
         char_entry.object_id = info.object_id;
         char_entry.account_name = account_name;
         char_entry.name = info.name.clone();
-        char_entry.class_id = info.class_id;
-        char_entry.level = info.level;
-        char_entry.exp = info.exp;
-        char_entry.sp = info.sp;
+        if info.class_id > 0 { char_entry.class_id = info.class_id; }
+        if info.level > 0 { char_entry.level = info.level; }
+        if info.exp > 0 { char_entry.exp = info.exp; }
+        if info.sp > 0 { char_entry.sp = info.sp; }
         char_entry.client_addr = client_addr.map(|a| a.to_string());
         char_entry.location = Location {
             x: info.x,
@@ -223,28 +241,15 @@ impl CharacterTracker {
             z: info.z,
             heading: info.heading,
         };
-        char_entry.vitals = Vitals {
-            cur_hp: info.cur_hp,
-            max_hp: info.max_hp,
-            cur_mp: info.cur_mp,
-            max_mp: info.max_mp,
-            cur_cp: info.cur_cp,
-            max_cp: info.max_cp,
-        };
-        char_entry.stats = Stats {
-            p_atk: info.p_atk,
-            p_def: info.p_def,
-            m_atk: info.m_atk,
-            m_def: info.m_def,
-            p_atk_spd: info.p_atk_spd,
-            m_atk_spd: info.m_atk_spd,
-            run_spd: 0,
-            walk_spd: 0,
-        };
+        if info.cur_hp > 0 { char_entry.vitals.cur_hp = info.cur_hp; }
+        if info.max_hp > 0 { char_entry.vitals.max_hp = info.max_hp; }
+        if info.cur_mp > 0 { char_entry.vitals.cur_mp = info.cur_mp; }
+        if info.max_mp > 0 { char_entry.vitals.max_mp = info.max_mp; }
         char_entry.last_updated_epoch_ms = now;
 
         *active = Some(info.object_id);
-        info!("Updated character info for: {} (ID: {}, Client: {:?})", info.name, info.object_id, client_addr);
+        info!("Updated player character: {} (ID: {}, Level: {}, HP: {}/{})",
+            info.name, info.object_id, char_entry.level, char_entry.vitals.cur_hp, char_entry.vitals.max_hp);
 
         let _ = self.event_tx.send(CompanionEvent::CharacterLoaded {
             client_addr,
@@ -259,6 +264,15 @@ impl CharacterTracker {
         attrs: &[l2companion_protocol::StatusUpdateAttribute],
         now: u64,
     ) {
+        if let Some(addr) = client_addr {
+            let c_to_o = self.client_to_object.read().await;
+            if let Some(&my_id) = c_to_o.get(&addr) {
+                if object_id != my_id {
+                    return; // Ignore other players / NPCs / mobs
+                }
+            }
+        }
+
         let mut chars = self.characters.write().await;
         if let Some(char_entry) = chars.get_mut(&object_id) {
             for attr in attrs {
@@ -295,6 +309,15 @@ impl CharacterTracker {
         z: i32,
         now: u64,
     ) {
+        if let Some(addr) = client_addr {
+            let c_to_o = self.client_to_object.read().await;
+            if let Some(&my_id) = c_to_o.get(&addr) {
+                if object_id != my_id {
+                    return; // Ignore other entities
+                }
+            }
+        }
+
         let mut chars = self.characters.write().await;
         if let Some(char_entry) = chars.get_mut(&object_id) {
             char_entry.location.x = x;
