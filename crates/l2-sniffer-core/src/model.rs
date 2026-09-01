@@ -59,5 +59,6 @@ pub struct Character {
     pub vitals: Vitals,
     pub stats: Stats,
     pub inventory: Vec<InventoryItem>,
+    pub client_addr: Option<String>,
     pub last_updated_epoch_ms: u64,
 }

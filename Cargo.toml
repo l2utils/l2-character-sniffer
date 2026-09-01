@@ -24,6 +24,7 @@ l2-sniffer-core = { path = "crates/l2-sniffer-core" }
 tokio = { version = "1.43", features = ["full"] }
 futures-util = "0.3"
 pcap = "2.2"
+pcap-file = "2.0"
 
 # Serialization & Data
 serde = { version = "1.0", features = ["derive"] }

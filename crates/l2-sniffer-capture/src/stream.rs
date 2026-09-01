@@ -1,9 +1,13 @@
-//! Packet capture engine and sniffer runner.
+//! Packet capture engine with multi-client TCP stream demuxing.
 
-use std::path::Path;
+use std::collections::HashMap;
+use std::fs::File;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use bytes::BytesMut;
 use l2_sniffer_protocol::{L2FrameCodec, L2Packet};
 use pcap::Capture;
+use pcap_file::pcapng::PcapNgReader;
+use pcap_file::pcap::PcapReader;
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
@@ -12,10 +16,73 @@ use tracing::{error, info, warn};
 pub enum CaptureError {
     #[error("Pcap error: {0}")]
     Pcap(#[from] pcap::Error),
+    #[error("Pcap-file error: {0}")]
+    PcapFile(String),
     #[error("Interface not found: {0}")]
     InterfaceNotFound(String),
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
+}
+
+/// Identifies packet direction relative to the client.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PacketDirection {
+    ServerToClient,
+    ClientToServer,
+}
+
+/// A captured packet associated with a specific client session.
+#[derive(Debug, Clone)]
+pub struct SessionPacket {
+    pub client_addr: SocketAddr,
+    pub server_addr: SocketAddr,
+    pub direction: PacketDirection,
+    pub packet: L2Packet,
+}
+
+/// Per-client TCP stream state for reassembling and decoding packets.
+pub struct ClientStream {
+    pub client_addr: SocketAddr,
+    pub server_addr: SocketAddr,
+    pub rx_buffer: BytesMut,
+    pub codec: L2FrameCodec,
+    pub packet_count: u64,
+}
+
+impl ClientStream {
+    pub fn new(client_addr: SocketAddr, server_addr: SocketAddr) -> Self {
+        Self {
+            client_addr,
+            server_addr,
+            rx_buffer: BytesMut::with_capacity(65535),
+            codec: L2FrameCodec::default(),
+            packet_count: 0,
+        }
+    }
+
+    pub fn ingest_server_payload(
+        &mut self,
+        payload: &[u8],
+        tx: &mpsc::Sender<SessionPacket>,
+    ) {
+        self.rx_buffer.extend_from_slice(payload);
+
+        while let Ok(Some(frame)) = self.codec.decode(&mut self.rx_buffer) {
+            if !frame.is_empty() {
+                self.packet_count += 1;
+                let opcode = frame[0];
+                let parsed = L2Packet::parse(opcode, &frame[1..]);
+
+                let session_packet = SessionPacket {
+                    client_addr: self.client_addr,
+                    server_addr: self.server_addr,
+                    direction: PacketDirection::ServerToClient,
+                    packet: parsed,
+                };
+                let _ = tx.blocking_send(session_packet);
+            }
+        }
+    }
 }
 
 pub struct SnifferBuilder {
@@ -25,6 +92,7 @@ pub struct SnifferBuilder {
     snaplen: i32,
     promiscuous: bool,
     timeout_ms: i32,
+    game_ports: Vec<u16>,
 }
 
 impl Default for SnifferBuilder {
@@ -32,11 +100,11 @@ impl Default for SnifferBuilder {
         Self {
             device_name: None,
             pcap_file: None,
-            // Default L2 Game Server port is 7777, Login Server is 2106
             bpf_filter: "tcp port 7777 or tcp port 2106".to_string(),
             snaplen: 65535,
             promiscuous: true,
             timeout_ms: 1000,
+            game_ports: vec![7777, 2106],
         }
     }
 }
@@ -61,10 +129,17 @@ impl SnifferBuilder {
         self
     }
 
+    pub fn game_ports(mut self, ports: Vec<u16>) -> Self {
+        self.game_ports = ports;
+        self
+    }
+
     pub fn build(self) -> Result<SnifferSession, CaptureError> {
         if let Some(file_path) = self.pcap_file {
-            let cap = Capture::from_file(Path::new(&file_path))?;
-            return Ok(SnifferSession::File(cap));
+            return Ok(SnifferSession::OfflineFile {
+                path: file_path,
+                game_ports: self.game_ports,
+            });
         }
 
         let device_name = match self.device_name {
@@ -83,33 +158,43 @@ impl SnifferBuilder {
             .open()?
             .setnonblock()?;
 
-        Ok(SnifferSession::Live(cap, self.bpf_filter))
+        Ok(SnifferSession::Live {
+            cap,
+            filter: self.bpf_filter,
+            game_ports: self.game_ports,
+        })
     }
 }
 
 pub enum SnifferSession {
-    Live(Capture<pcap::Active>, String),
-    File(Capture<pcap::Offline>),
+    Live {
+        cap: Capture<pcap::Active>,
+        filter: String,
+        game_ports: Vec<u16>,
+    },
+    OfflineFile {
+        path: String,
+        game_ports: Vec<u16>,
+    },
 }
 
 impl SnifferSession {
-    /// Starts background capture thread sending framed raw payloads or parsed packets to an async channel.
-    pub fn spawn_worker(mut self, tx: mpsc::Sender<L2Packet>) -> tokio::task::JoinHandle<()> {
+    /// Starts background capture thread streaming parsed packets with client session context.
+    pub fn spawn_worker(mut self, tx: mpsc::Sender<SessionPacket>) -> tokio::task::JoinHandle<()> {
         tokio::task::spawn_blocking(move || {
-            let mut codec = L2FrameCodec::default();
-            let mut stream_buffer = BytesMut::with_capacity(65535);
+            let mut streams: HashMap<SocketAddr, ClientStream> = HashMap::new();
 
             match &mut self {
-                SnifferSession::Live(cap, filter) => {
+                SnifferSession::Live { cap, filter, game_ports } => {
                     if let Err(e) = cap.filter(filter, true) {
                         warn!("Failed to apply BPF filter '{filter}': {e}");
                     }
-                    info!("Sniffer live capture started");
+                    info!("Sniffer live capture started on network interface");
 
                     loop {
                         match cap.next_packet() {
                             Ok(packet) => {
-                                Self::process_packet_data(packet.data, &mut stream_buffer, &mut codec, &tx);
+                                Self::process_raw_frame(packet.data, game_ports, &mut streams, &tx);
                             }
                             Err(pcap::Error::TimeoutExpired) => continue,
                             Err(pcap::Error::NoMorePackets) => break,
@@ -120,49 +205,109 @@ impl SnifferSession {
                         }
                     }
                 }
-                SnifferSession::File(cap) => {
-                    info!("Sniffer reading offline pcap file");
-                    while let Ok(packet) = cap.next_packet() {
-                        Self::process_packet_data(packet.data, &mut stream_buffer, &mut codec, &tx);
+                SnifferSession::OfflineFile { path, game_ports } => {
+                    info!("Sniffer processing offline capture: {path}");
+                    if let Err(e) = Self::read_offline_file(path, game_ports, &mut streams, &tx) {
+                        error!("Error processing offline capture file: {e}");
                     }
                 }
             }
-            info!("Sniffer capture worker finished");
+            info!("Sniffer capture worker finished (tracked {} active client streams)", streams.len());
         })
     }
 
-    fn process_packet_data(
-        raw: &[u8],
-        buf: &mut BytesMut,
-        codec: &mut L2FrameCodec,
-        tx: &mpsc::Sender<L2Packet>,
-    ) {
-        // Strip Ethernet/IP/TCP headers or push payload
-        // Standard TCP payload offset heuristic (e.g. Ethernet (14) + IP (20) + TCP (20) = 54 bytes)
-        let payload_offset = if raw.len() > 54 && raw[12] == 0x08 && raw[13] == 0x00 {
-            let ip_header_len = ((raw[14] & 0x0F) * 4) as usize;
-            let tcp_offset_byte = 14 + ip_header_len + 12;
-            if raw.len() > tcp_offset_byte {
-                let tcp_header_len = (((raw[tcp_offset_byte] >> 4) & 0x0F) * 4) as usize;
-                14 + ip_header_len + tcp_header_len
-            } else {
-                54
-            }
-        } else {
-            0
-        };
+    fn read_offline_file(
+        path: &str,
+        game_ports: &[u16],
+        streams: &mut HashMap<SocketAddr, ClientStream>,
+        tx: &mpsc::Sender<SessionPacket>,
+    ) -> Result<(), CaptureError> {
+        let file = File::open(path)?;
 
-        if raw.len() > payload_offset {
-            let payload = &raw[payload_offset..];
-            buf.extend_from_slice(payload);
-
-            while let Ok(Some(frame)) = codec.decode(buf) {
-                if !frame.is_empty() {
-                    let opcode = frame[0];
-                    let parsed = L2Packet::parse(opcode, &frame[1..]);
-                    let _ = tx.blocking_send(parsed);
+        // Try reading as PCAPNG first
+        if let Ok(mut reader) = PcapNgReader::new(file) {
+            info!("Parsed capture as PCAPNG format");
+            while let Some(block) = reader.next_block() {
+                if let Ok(pcap_file::pcapng::Block::EnhancedPacket(epb)) = block {
+                    Self::process_raw_frame(&epb.data, game_ports, streams, tx);
+                } else if let Ok(pcap_file::pcapng::Block::SimplePacket(spb)) = block {
+                    Self::process_raw_frame(&spb.data, game_ports, streams, tx);
                 }
             }
+            return Ok(());
+        }
+
+        // Fallback to legacy PCAP format
+        let file2 = File::open(path)?;
+        if let Ok(mut reader) = PcapReader::new(file2) {
+            info!("Parsed capture as legacy PCAP format");
+            while let Some(pkt) = reader.next_packet() {
+                if let Ok(p) = pkt {
+                    Self::process_raw_frame(&p.data, game_ports, streams, tx);
+                }
+            }
+            return Ok(());
+        }
+
+        Err(CaptureError::PcapFile("Unsupported pcap/pcapng format".into()))
+    }
+
+    /// Extracts IPv4/TCP headers and routes TCP payload to the corresponding client stream.
+    fn process_raw_frame(
+        raw: &[u8],
+        game_ports: &[u16],
+        streams: &mut HashMap<SocketAddr, ClientStream>,
+        tx: &mpsc::Sender<SessionPacket>,
+    ) {
+        // Minimum Ethernet (14) + IPv4 (20) + TCP (20) = 54 bytes
+        if raw.len() < 54 {
+            return;
+        }
+
+        // Check for Ethernet II IPv4 frame (EtherType 0x0800)
+        let ethertype = u16::from_be_bytes([raw[12], raw[13]]);
+        if ethertype != 0x0800 {
+            return;
+        }
+
+        // IPv4 Header
+        let ip_header = &raw[14..];
+        let ip_version = (ip_header[0] >> 4) & 0x0F;
+        let ip_ihl = ((ip_header[0] & 0x0F) * 4) as usize;
+        let ip_proto = ip_header[9];
+
+        if ip_version != 4 || ip_proto != 6 || raw.len() < 14 + ip_ihl + 20 {
+            return; // Not TCP IPv4
+        }
+
+        let src_ip = IpAddr::V4(Ipv4Addr::new(ip_header[12], ip_header[13], ip_header[14], ip_header[15]));
+        let dst_ip = IpAddr::V4(Ipv4Addr::new(ip_header[16], ip_header[17], ip_header[18], ip_header[19]));
+
+        // TCP Header
+        let tcp_header = &raw[14 + ip_ihl..];
+        let src_port = u16::from_be_bytes([tcp_header[0], tcp_header[1]]);
+        let dst_port = u16::from_be_bytes([tcp_header[2], tcp_header[3]]);
+        let tcp_offset = (((tcp_header[12] >> 4) & 0x0F) * 4) as usize;
+
+        let total_header_len = 14 + ip_ihl + tcp_offset;
+        if raw.len() <= total_header_len {
+            return; // No TCP payload
+        }
+
+        let payload = &raw[total_header_len..];
+        let src_socket = SocketAddr::new(src_ip, src_port);
+        let dst_socket = SocketAddr::new(dst_ip, dst_port);
+
+        // Check if packet is Server -> Client (Server port matches L2 game port)
+        if game_ports.contains(&src_port) {
+            let client_addr = dst_socket;
+            let server_addr = src_socket;
+
+            let stream = streams
+                .entry(client_addr)
+                .or_insert_with(|| ClientStream::new(client_addr, server_addr));
+
+            stream.ingest_server_payload(payload, tx);
         }
     }
 }

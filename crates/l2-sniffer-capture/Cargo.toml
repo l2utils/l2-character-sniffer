@@ -8,6 +8,7 @@ authors.workspace = true
 [dependencies]
 l2-sniffer-protocol.workspace = true
 pcap.workspace = true
+pcap-file.workspace = true
 tokio.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

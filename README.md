@@ -40,27 +40,26 @@ To run the pre-compiled binary, end users **only** need the Npcap driver:
 ### For Developers (Building from Source)
 1. **Rust Toolchain** (`rustup default stable-x86_64-pc-windows-msvc`)
 2. **C++ Build Tools (MSVC Linker)**
-3. **Npcap SDK** (Extract and add `C:\npcap-sdk\Lib\x64` to your `LIB` environment variable):
-   - **PowerShell:** `$env:LIB += ";C:\npcap-sdk\Lib\x64"`
-   - **CMD:** `set LIB=%LIB%;C:\npcap-sdk\Lib\x64`
+3. *(The compile-time `.lib` stubs for **x64**, **ARM64**, and **x86** are pre-vendored in [`lib/`](lib), so no SDK downloads or environment variables are needed!)*
 
 ---
 
 ## Building and Running
 
-1. **List available network interfaces:**
+1. **List available network interfaces (e.g. Wi-Fi):**
    ```sh
    cargo run -p l2-sniffer-cli -- devices
    ```
 
-2. **Start live packet capture:**
+2. **Start live packet capture (WiFi or default):**
    ```sh
    cargo run -p l2-sniffer-cli -- sniff
-   ```
-   Or capture on a specific device / offline pcap:
-   ```sh
    cargo run -p l2-sniffer-cli -- sniff --device "\Device\NPF_{...}"
-   cargo run -p l2-sniffer-cli -- sniff --pcap sample_capture.pcap
+   ```
+
+3. **Replay and analyze multi-client capture files (.pcap / .pcapng):**
+   ```sh
+   cargo run -p l2-sniffer-cli -- analyze captures/l2-multi-client.pcapng
    ```
 
 ---
