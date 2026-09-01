@@ -40,6 +40,16 @@ pub struct SessionPacket {
     pub packet: L2Packet,
 }
 
+/// Messages emitted by the capture worker.
+#[derive(Debug, Clone)]
+pub enum SessionMessage {
+    ClientConnected {
+        client_addr: SocketAddr,
+        server_addr: SocketAddr,
+    },
+    Packet(SessionPacket),
+}
+
 /// Per-client TCP stream state for reassembling and decoding packets.
 pub struct ClientStream {
     pub client_addr: SocketAddr,
@@ -63,7 +73,7 @@ impl ClientStream {
     pub fn ingest_server_payload(
         &mut self,
         payload: &[u8],
-        tx: &mpsc::Sender<SessionPacket>,
+        tx: &mpsc::Sender<SessionMessage>,
     ) {
         self.rx_buffer.extend_from_slice(payload);
 
@@ -79,7 +89,7 @@ impl ClientStream {
                     direction: PacketDirection::ServerToClient,
                     packet: parsed,
                 };
-                let _ = tx.blocking_send(session_packet);
+                let _ = tx.blocking_send(SessionMessage::Packet(session_packet));
             }
         }
     }
@@ -180,7 +190,7 @@ pub enum CaptureSession {
 
 impl CaptureSession {
     /// Starts background capture thread streaming parsed packets with client session context.
-    pub fn spawn_worker(mut self, tx: mpsc::Sender<SessionPacket>) -> tokio::task::JoinHandle<()> {
+    pub fn spawn_worker(mut self, tx: mpsc::Sender<SessionMessage>) -> tokio::task::JoinHandle<()> {
         tokio::task::spawn_blocking(move || {
             let mut streams: HashMap<SocketAddr, ClientStream> = HashMap::new();
 
@@ -220,7 +230,7 @@ impl CaptureSession {
         path: &str,
         game_ports: &[u16],
         streams: &mut HashMap<SocketAddr, ClientStream>,
-        tx: &mpsc::Sender<SessionPacket>,
+        tx: &mpsc::Sender<SessionMessage>,
     ) -> Result<(), CaptureError> {
         let file = File::open(path)?;
 
@@ -257,7 +267,7 @@ impl CaptureSession {
         raw: &[u8],
         game_ports: &[u16],
         streams: &mut HashMap<SocketAddr, ClientStream>,
-        tx: &mpsc::Sender<SessionPacket>,
+        tx: &mpsc::Sender<SessionMessage>,
     ) {
         // Minimum Ethernet (14) + IPv4 (20) + TCP (20) = 54 bytes
         if raw.len() < 54 {
@@ -290,24 +300,33 @@ impl CaptureSession {
         let tcp_offset = (((tcp_header[12] >> 4) & 0x0F) * 4) as usize;
 
         let total_header_len = 14 + ip_ihl + tcp_offset;
-        if raw.len() <= total_header_len {
-            return; // No TCP payload
-        }
-
-        let payload = &raw[total_header_len..];
         let src_socket = SocketAddr::new(src_ip, src_port);
         let dst_socket = SocketAddr::new(dst_ip, dst_port);
 
-        // Check if packet is Server -> Client (Server port matches L2 game port)
-        if game_ports.contains(&src_port) {
-            let client_addr = dst_socket;
-            let server_addr = src_socket;
+        // Determine client and server addresses
+        let (client_addr, server_addr, is_server_to_client) = if game_ports.contains(&src_port) {
+            (dst_socket, src_socket, true)
+        } else if game_ports.contains(&dst_port) {
+            (src_socket, dst_socket, false)
+        } else {
+            return; // Irrelevant port
+        };
 
-            let stream = streams
-                .entry(client_addr)
-                .or_insert_with(|| ClientStream::new(client_addr, server_addr));
+        // If this is a new client connection, register it and notify
+        if !streams.contains_key(&client_addr) {
+            streams.insert(client_addr, ClientStream::new(client_addr, server_addr));
+            let _ = tx.blocking_send(SessionMessage::ClientConnected {
+                client_addr,
+                server_addr,
+            });
+        }
 
-            stream.ingest_server_payload(payload, tx);
+        // Process server -> client payload if present
+        if is_server_to_client && raw.len() > total_header_len {
+            let payload = &raw[total_header_len..];
+            if let Some(stream) = streams.get_mut(&client_addr) {
+                stream.ingest_server_payload(payload, tx);
+            }
         }
     }
 }

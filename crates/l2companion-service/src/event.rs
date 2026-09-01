@@ -9,6 +9,7 @@ use crate::model::{Character, Location, Vitals};
 pub enum CompanionEvent {
     ClientConnected {
         client_addr: SocketAddr,
+        server_addr: SocketAddr,
     },
     CharacterLoaded {
         client_addr: Option<SocketAddr>,
