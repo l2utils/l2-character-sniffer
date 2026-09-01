@@ -1,0 +1,16 @@
+[package]
+name = "l2-sniffer-protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+bytes.workspace = true
+byteorder.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+blowfish.workspace = true
+cipher.workspace = true

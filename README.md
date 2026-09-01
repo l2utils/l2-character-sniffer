@@ -1,6 +1,29 @@
 # l2-character-sniffer
 
-Sniff your own Lineage 2 character data.
+Modular Rust monorepo for sniffing Lineage 2 network traffic and tracking character state.
+
+## Workspace Architecture
+
+```
+l2-character-sniffer/
+├── Cargo.toml                      # Workspace root (shared dependencies, profiles)
+├── crates/
+│   ├── l2-sniffer-protocol/        # Packet codecs, framing, opcodes, decryption (pure Rust)
+│   ├── l2-sniffer-capture/         # Npcap/Pcap capture engine, interface discovery, TCP reassembly
+│   ├── l2-sniffer-core/            # Character domain models, state machine, event broadcaster
+│   └── l2-sniffer-cli/             # Standalone CLI capture runner & device inspector
+```
+
+### Crates Overview
+
+| Crate | Type | Description |
+| :--- | :--- | :--- |
+| **`l2-sniffer-protocol`** | Library | Lineage 2 packet framing (`L2FrameCodec`), opcode registry (`ServerOpcode`), Blowfish / XOR decryption (`L2Cryptor`), and packet parsers (`UserInfo`, `StatusUpdate`, `ItemList`, etc.). |
+| **`l2-sniffer-capture`** | Library | Packet capture engine using Npcap/libpcap, device discovery, and streaming packet worker. |
+| **`l2-sniffer-core`** | Library | Decoupled domain models (`Character`, `Vitals`, `Stats`, `Location`) and state tracker (`CharacterTracker`). |
+| **`l2-sniffer-cli`** | Binary | Standalone CLI (`l2-sniffer devices`, `l2-sniffer sniff`) for interface inspection and terminal monitoring. |
+
+---
 
 ## Prerequisites
 
@@ -9,48 +32,41 @@ To run the pre-compiled binary, end users **only** need the Npcap driver:
 1. **Npcap Driver**
    - Download and run the Npcap installer from [npcap.com](https://npcap.com/#download).
    - **Important:** During installation, check **"Install Npcap in WinPcap API-compatible Mode"**.
-   - *Note:* Windows does not include a native packet capture driver or `wpcap.dll`. Without Npcap installed, packet capture applications cannot bind to network interfaces.
 2. **Administrator Privileges**
    - Must run the binary as Administrator to capture network interfaces.
-
-*(End users do **NOT** need Rust, Visual Studio, or the Npcap SDK).*
 
 ---
 
 ### For Developers (Building from Source)
-In addition to installing the Npcap driver above, building the project from source requires:
-
-1. **Rust Toolchain**
-   - Install Rust via [rustup.rs](https://rustup.rs/) (`x86_64-pc-windows-msvc`).
-
+1. **Rust Toolchain** (`rustup default stable-x86_64-pc-windows-msvc`)
 2. **C++ Build Tools (MSVC Linker)**
-   - Install [Visual Studio C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with the **"Desktop development with C++"** workload for `link.exe` and the Windows SDK.
-
-3. **Npcap SDK (Compile-Time Link Libraries)**
-   - Download the **Npcap SDK** (`.zip`) from [npcap.com](https://npcap.com/#download).
-   - Extract to a directory (e.g., `C:\npcap-sdk`).
-   - Add `C:\npcap-sdk\Lib\x64` to your `LIB` environment variable so the Rust linker can locate `wpcap.lib` and `Packet.lib`:
-     - **PowerShell:** `$env:LIB += ";C:\npcap-sdk\Lib\x64"`
-     - **CMD:** `set LIB=%LIB%;C:\npcap-sdk\Lib\x64`
-     - **System Environment Variable:** Add `C:\npcap-sdk\Lib\x64` under System Variables -> `LIB`.
+3. **Npcap SDK** (Extract and add `C:\npcap-sdk\Lib\x64` to your `LIB` environment variable):
+   - **PowerShell:** `$env:LIB += ";C:\npcap-sdk\Lib\x64"`
+   - **CMD:** `set LIB=%LIB%;C:\npcap-sdk\Lib\x64`
 
 ---
 
 ## Building and Running
 
-1. **Clone the repository:**
+1. **List available network interfaces:**
    ```sh
-   git clone https://github.com/jason-yang/l2-character-sniffer.git
-   cd l2-character-sniffer
+   cargo run -p l2-sniffer-cli -- devices
    ```
 
-2. **Build the binary:**
+2. **Start live packet capture:**
    ```sh
-   cargo build --release
+   cargo run -p l2-sniffer-cli -- sniff
+   ```
+   Or capture on a specific device / offline pcap:
+   ```sh
+   cargo run -p l2-sniffer-cli -- sniff --device "\Device\NPF_{...}"
+   cargo run -p l2-sniffer-cli -- sniff --pcap sample_capture.pcap
    ```
 
-3. **Run the application:**
-   > ⚠️ **Note:** Administrative privileges are required to open network interfaces for packet sniffing. Run your terminal or binary as Administrator.
-   ```sh
-   cargo run --release
-   ```
+---
+
+## Testing
+
+```sh
+cargo test -p l2-sniffer-protocol -p l2-sniffer-core
+```
