@@ -47,6 +47,10 @@ pub enum SessionMessage {
         client_addr: SocketAddr,
         server_addr: SocketAddr,
     },
+    ClientDisconnected {
+        client_addr: SocketAddr,
+        reason: String,
+    },
     Packet(SessionPacket),
 }
 
@@ -262,7 +266,7 @@ impl SnifferSession {
         Err(CaptureError::PcapFile("Unsupported pcap/pcapng format".into()))
     }
 
-    /// Extracts IPv4/TCP headers and routes TCP payload to the corresponding client stream.
+    /// Extracts IPv4/TCP headers, detects SYN/FIN/RST connection lifecycle, and routes payloads.
     fn process_raw_frame(
         raw: &[u8],
         game_ports: &[u16],
@@ -298,6 +302,10 @@ impl SnifferSession {
         let src_port = u16::from_be_bytes([tcp_header[0], tcp_header[1]]);
         let dst_port = u16::from_be_bytes([tcp_header[2], tcp_header[3]]);
         let tcp_offset = (((tcp_header[12] >> 4) & 0x0F) * 4) as usize;
+        let tcp_flags = tcp_header[13];
+
+        let is_fin = (tcp_flags & 0x01) != 0;
+        let is_rst = (tcp_flags & 0x04) != 0;
 
         let total_header_len = 14 + ip_ihl + tcp_offset;
         let src_socket = SocketAddr::new(src_ip, src_port);
@@ -311,6 +319,21 @@ impl SnifferSession {
         } else {
             return; // Irrelevant port
         };
+
+        // Handle disconnect (FIN or RST)
+        if (is_fin || is_rst) && streams.contains_key(&client_addr) {
+            streams.remove(&client_addr);
+            let reason = if is_rst {
+                "Connection reset (RST)".to_string()
+            } else {
+                "Connection closed (FIN)".to_string()
+            };
+            let _ = tx.blocking_send(SessionMessage::ClientDisconnected {
+                client_addr,
+                reason,
+            });
+            return;
+        }
 
         // If this is a new client connection, register it and notify
         if !streams.contains_key(&client_addr) {
