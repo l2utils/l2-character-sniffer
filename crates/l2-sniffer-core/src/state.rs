@@ -59,6 +59,15 @@ impl CharacterTracker {
         }
     }
 
+    /// Registers a new game client connection and emits an event.
+    pub async fn register_client_connection(&self, client_addr: SocketAddr, server_addr: SocketAddr) {
+        info!("Client connected: {} -> {}", client_addr, server_addr);
+        let _ = self.event_tx.send(SnifferEvent::ClientConnected {
+            client_addr,
+            server_addr,
+        });
+    }
+
     /// Ingest a packet without client session context.
     pub async fn handle_packet(&self, packet: L2Packet) {
         self.handle_packet_with_client(None, packet).await;

@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use l2_sniffer_capture::{list_devices, SessionPacket, SnifferBuilder};
+use l2_sniffer_capture::{list_devices, SessionMessage, SnifferBuilder};
 use l2_sniffer_core::{CharacterTracker, SnifferEvent};
 use tokio::sync::mpsc;
 
@@ -50,7 +50,6 @@ fn init_windows_dll_path() {
         extern "system" {
             fn SetDllDirectoryA(lpPathName: *const u8) -> i32;
         }
-        // Standard Npcap installation path
         let npcap_path = b"C:\\Windows\\System32\\Npcap\0";
         SetDllDirectoryA(npcap_path.as_ptr());
     }
@@ -124,7 +123,7 @@ async fn run_capture_session(
     let tracker = CharacterTracker::new();
     let mut event_rx = tracker.subscribe();
 
-    let (tx, mut rx) = mpsc::channel::<SessionPacket>(4096);
+    let (tx, mut rx) = mpsc::channel::<SessionMessage>(4096);
     let worker_handle = session.spawn_worker(tx);
 
     // Track per-client packet stats
@@ -133,19 +132,29 @@ async fn run_capture_session(
         let mut total_packets = 0u64;
         let mut client_stats: HashMap<SocketAddr, u64> = HashMap::new();
 
-        while let Some(sp) = rx.recv().await {
-            total_packets += 1;
-            *client_stats.entry(sp.client_addr).or_insert(0) += 1;
-            tracker_clone.handle_packet_with_client(Some(sp.client_addr), sp.packet).await;
+        while let Some(msg) = rx.recv().await {
+            match msg {
+                SessionMessage::ClientConnected { client_addr, server_addr } => {
+                    tracker_clone.register_client_connection(client_addr, server_addr).await;
+                }
+                SessionMessage::Packet(sp) => {
+                    total_packets += 1;
+                    *client_stats.entry(sp.client_addr).or_insert(0) += 1;
+                    tracker_clone.handle_packet_with_client(Some(sp.client_addr), sp.packet).await;
+                }
+            }
         }
         (total_packets, client_stats)
     });
 
-    println!("Capture session running. Processing packets...\n");
+    println!("Capture session running. Waiting for game clients / packets...\n");
 
     let display_handle = tokio::spawn(async move {
         while let Ok(event) = event_rx.recv().await {
             match event {
+                SnifferEvent::ClientConnected { client_addr, server_addr } => {
+                    println!("✨ [CLIENT CONNECTED] Game client detected: {} <-> Server {}", client_addr, server_addr);
+                }
                 SnifferEvent::CharacterLoaded { client_addr, character } => {
                     let client_str = client_addr.map(|a| a.to_string()).unwrap_or_else(|| "Unknown".into());
                     println!("[CHARACTER] Client: {:<21} | Level: {:<3} | Class: {:<3} | HP: {}/{}",

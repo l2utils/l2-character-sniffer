@@ -6,4 +6,7 @@ pub mod device;
 pub mod stream;
 
 pub use device::{default_device, list_devices, NetworkInterface};
-pub use stream::{CaptureError, ClientStream, PacketDirection, SessionPacket, SnifferBuilder, SnifferSession};
+pub use stream::{
+    CaptureError, ClientStream, PacketDirection, SessionMessage, SessionPacket, SnifferBuilder,
+    SnifferSession,
+};
