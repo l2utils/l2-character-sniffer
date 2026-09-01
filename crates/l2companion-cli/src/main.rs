@@ -137,6 +137,9 @@ async fn run_capture_session(
                 SessionMessage::ClientConnected { client_addr, server_addr } => {
                     tracker_clone.register_client_connection(client_addr, server_addr).await;
                 }
+                SessionMessage::ClientDisconnected { client_addr, reason } => {
+                    tracker_clone.unregister_client_connection(client_addr, reason).await;
+                }
                 SessionMessage::Packet(sp) => {
                     total_packets += 1;
                     *client_stats.entry(sp.client_addr).or_insert(0) += 1;
@@ -153,7 +156,10 @@ async fn run_capture_session(
         while let Ok(event) = event_rx.recv().await {
             match event {
                 CompanionEvent::ClientConnected { client_addr, server_addr } => {
-                    println!("✨ [CLIENT CONNECTED] Game client detected: {} <-> Server {}", client_addr, server_addr);
+                    println!("✨ [CLIENT CONNECTED]    Game client detected: {} <-> Server {}", client_addr, server_addr);
+                }
+                CompanionEvent::ClientDisconnected { client_addr, reason } => {
+                    println!("🔴 [CLIENT DISCONNECTED] Client session closed: {} ({})", client_addr, reason);
                 }
                 CompanionEvent::CharacterLoaded { client_addr, character } => {
                     let client_str = client_addr.map(|a| a.to_string()).unwrap_or_else(|| "Unknown".into());

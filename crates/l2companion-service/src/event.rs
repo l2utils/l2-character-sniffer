@@ -11,6 +11,10 @@ pub enum CompanionEvent {
         client_addr: SocketAddr,
         server_addr: SocketAddr,
     },
+    ClientDisconnected {
+        client_addr: SocketAddr,
+        reason: String,
+    },
     CharacterLoaded {
         client_addr: Option<SocketAddr>,
         character: Character,

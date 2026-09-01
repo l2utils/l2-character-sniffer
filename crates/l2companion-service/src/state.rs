@@ -68,6 +68,17 @@ impl CharacterTracker {
         });
     }
 
+    /// Unregisters a disconnected game client and emits a disconnect event.
+    pub async fn unregister_client_connection(&self, client_addr: SocketAddr, reason: String) {
+        info!("Client disconnected: {} ({})", client_addr, reason);
+        let mut c_to_o = self.client_to_object.write().await;
+        c_to_o.remove(&client_addr);
+        let _ = self.event_tx.send(CompanionEvent::ClientDisconnected {
+            client_addr,
+            reason,
+        });
+    }
+
     /// Ingest a packet without client session context.
     pub async fn handle_packet(&self, packet: L2Packet) {
         self.handle_packet_with_client(None, packet).await;
