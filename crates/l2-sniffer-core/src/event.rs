@@ -1,8 +1,8 @@
-//! Character state update events.
+//! Character and Account state update events.
 
 use std::net::SocketAddr;
 use serde::{Deserialize, Serialize};
-use crate::model::{Character, Location, Vitals};
+use crate::model::{CharSelectSlot, Character, Location, Vitals};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "event", content = "payload")]
@@ -14,6 +14,15 @@ pub enum SnifferEvent {
     ClientDisconnected {
         client_addr: SocketAddr,
         reason: String,
+    },
+    AccountDetected {
+        client_addr: Option<SocketAddr>,
+        account_name: String,
+    },
+    AccountRosterLoaded {
+        client_addr: Option<SocketAddr>,
+        account_name: String,
+        characters: Vec<CharSelectSlot>,
     },
     CharacterLoaded {
         client_addr: Option<SocketAddr>,

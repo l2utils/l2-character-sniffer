@@ -161,10 +161,25 @@ async fn run_capture_session(
                 SnifferEvent::ClientDisconnected { client_addr, reason } => {
                     println!("🔴 [CLIENT DISCONNECTED] Client session closed: {} ({})", client_addr, reason);
                 }
+                SnifferEvent::AccountDetected { client_addr, account_name } => {
+                    let client_str = client_addr.map(|a| a.to_string()).unwrap_or_else(|| "-".into());
+                    println!("👤 [ACCOUNT DETECTED]    Account: \"{}\" on [{}]", account_name, client_str);
+                }
+                SnifferEvent::AccountRosterLoaded { client_addr, account_name, characters } => {
+                    let client_str = client_addr.map(|a| a.to_string()).unwrap_or_else(|| "-".into());
+                    println!("📋 [ACCOUNT ROSTER]      Account: \"{}\" [{}] ({} characters):", account_name, client_str, characters.len());
+                    for (i, c) in characters.iter().enumerate() {
+                        let is_last = i == characters.len() - 1;
+                        let branch = if is_last { "└─" } else { "├─" };
+                        println!("   {} Slot {}: {:<16} | Level: {:<2} | Class ID: {:<3} | HP: {:.0}",
+                            branch, i + 1, c.name, c.level, c.class_id, c.cur_hp);
+                    }
+                }
                 SnifferEvent::CharacterLoaded { client_addr, character } => {
                     let client_str = client_addr.map(|a| a.to_string()).unwrap_or_else(|| "Unknown".into());
-                    println!("[CHARACTER] Client: {:<21} | Level: {:<3} | Class: {:<3} | HP: {}/{}",
-                        client_str, character.level, character.class_id, character.vitals.cur_hp, character.vitals.max_hp);
+                    let acc_str = character.account_name.as_deref().map(|a| format!("Account: \"{}\" | ", a)).unwrap_or_default();
+                    println!("[CHARACTER] Client: {:<21} | {}Name: {:<16} | Level: {:<3} | Class: {:<3} | HP: {}/{}",
+                        client_str, acc_str, character.name, character.level, character.class_id, character.vitals.cur_hp, character.vitals.max_hp);
                 }
                 SnifferEvent::VitalsChanged { client_addr, object_id, vitals } => {
                     let client_str = client_addr.map(|a| a.to_string()).unwrap_or_else(|| "-".into());
@@ -181,9 +196,18 @@ async fn run_capture_session(
     display_handle.abort();
 
     let tracked = tracker.get_characters().await;
+    let accounts = tracker.get_accounts().await;
+
     println!("\n================== Capture Summary ==================");
     println!("Total Packets Decoded: {}", total_pkts);
     println!("Unique Client Streams: {}", client_stats.len());
+    if !accounts.is_empty() {
+        println!("Accounts Detected:     {}", accounts.len());
+        for acc in &accounts {
+            println!(" - Account \"{}\" (Client: {}) -> {} characters in roster",
+                acc.account_name, acc.client_addr, acc.character_roster.len());
+        }
+    }
     if !tracked.is_empty() {
         println!("Tracked Characters:    {}", tracked.len());
     }
