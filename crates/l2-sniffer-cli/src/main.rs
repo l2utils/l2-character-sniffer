@@ -14,6 +14,10 @@ use tokio::sync::mpsc;
 #[derive(Parser, Debug)]
 #[command(name = "l2-sniffer", version, about = "Lineage 2 Character Data Sniffer & Telemetry Server CLI")]
 struct Cli {
+    /// Enable debug mode (activates interactive GraphiQL browser UI)
+    #[arg(long, global = true)]
+    debug: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -119,10 +123,10 @@ async fn main() -> Result<()> {
             filter,
             port,
         } => {
-            run_capture_session(device, pcap, filter, port).await?;
+            run_capture_session(device, pcap, filter, port, cli.debug).await?;
         }
         Commands::Analyze { path, port } => {
-            run_capture_session(None, Some(path), None, port).await?;
+            run_capture_session(None, Some(path), None, port, cli.debug).await?;
         }
         Commands::Serve {
             port,
@@ -131,7 +135,7 @@ async fn main() -> Result<()> {
             filter,
         } => {
             println!("Starting Lineage 2 Telemetry Daemon & Web Service on port {port}...");
-            run_capture_session(device, pcap, filter, Some(port)).await?;
+            run_capture_session(device, pcap, filter, Some(port), cli.debug).await?;
         }
     }
 
@@ -206,6 +210,7 @@ async fn run_capture_session(
     pcap: Option<String>,
     filter: Option<String>,
     port: Option<u16>,
+    debug: bool,
 ) -> Result<()> {
     let mut builder = SnifferBuilder::new();
 
@@ -233,8 +238,10 @@ async fn run_capture_session(
 
     // Start API server if port is provided
     let _api_handle = if let Some(p) = port {
-        let (addr, handle) = start_api_server(tracker.clone(), p).await?;
-        println!("🚀 GraphiQL Playground: http://{}", addr);
+        let (addr, handle) = start_api_server(tracker.clone(), p, debug).await?;
+        if debug {
+            println!("🚀 GraphiQL Playground: http://{}", addr);
+        }
         println!("🧭 GraphQL Endpoint:   http://{}/graphql", addr);
         println!("📡 Subscriptions:      ws://{}/graphql/ws", addr);
         println!("🌐 REST Endpoints:      http://{}/api/...", addr);
