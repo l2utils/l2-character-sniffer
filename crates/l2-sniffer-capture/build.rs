@@ -13,12 +13,10 @@ fn main() {
             "x64"
         };
 
-        let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-        let root_dir = Path::new(&manifest_dir).parent().unwrap().parent().unwrap();
-        let lib_path = root_dir.join("lib").join(arch_dir);
+        let lib_path = Path::new("../../lib").join(arch_dir);
 
         if lib_path.exists() {
-            println!("cargo:rustc-link-search=native={}", lib_path.display());
+            println!("cargo:rustc-link-search=native=lib/{}", arch_dir);
         }
     }
 }
