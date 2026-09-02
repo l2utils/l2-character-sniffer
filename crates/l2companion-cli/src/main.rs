@@ -324,6 +324,10 @@ async fn run_capture_session(
     println!("Capture session running. Waiting for game clients / packets...\n");
 
     let display_handle = tokio::spawn(async move {
+        let mut last_inventory: HashMap<u32, usize> = HashMap::new();
+        let mut last_skills: HashMap<u32, usize> = HashMap::new();
+        let mut last_buffs: HashMap<u32, usize> = HashMap::new();
+
         while let Ok(event) = event_rx.recv().await {
             match event {
                 CompanionEvent::ClientConnected { client_addr, server_addr } => {
@@ -370,6 +374,10 @@ async fn run_capture_session(
                         client_str, object_id, vitals.cur_hp, vitals.max_hp, vitals.cur_mp, vitals.max_mp);
                 }
                 CompanionEvent::SkillsUpdated { client_addr, object_id, skills } => {
+                    if last_skills.get(&object_id) == Some(&skills.len()) {
+                        continue;
+                    }
+                    last_skills.insert(object_id, skills.len());
                     let client_str = client_addr.map(|a| a.to_string()).unwrap_or_else(|| "-".into());
                     let passives = skills.iter().filter(|s| s.is_passive).count();
                     let actives = skills.len() - passives;
@@ -377,11 +385,22 @@ async fn run_capture_session(
                         client_str, object_id, skills.len(), actives, passives);
                 }
                 CompanionEvent::BuffsUpdated { client_addr, object_id, buffs } => {
+                    if last_buffs.get(&object_id) == Some(&buffs.len()) {
+                        continue;
+                    }
+                    last_buffs.insert(object_id, buffs.len());
                     let client_str = client_addr.map(|a| a.to_string()).unwrap_or_else(|| "-".into());
                     println!("🌟 [BUFFS]     Client: {:<21} | Obj {}: {} active buff effects",
                         client_str, object_id, buffs.len());
                 }
                 CompanionEvent::InventoryLoaded { client_addr, object_id, items } => {
+                    if items.is_empty() && last_inventory.contains_key(&object_id) {
+                        continue;
+                    }
+                    if last_inventory.get(&object_id) == Some(&items.len()) {
+                        continue;
+                    }
+                    last_inventory.insert(object_id, items.len());
                     let client_str = client_addr.map(|a| a.to_string()).unwrap_or_else(|| "-".into());
                     let equipped = items.iter().filter(|i| i.equipped).count();
                     println!("🎒 [INVENTORY] Client: {:<21} | Obj {}: {} items ({} equipped)",

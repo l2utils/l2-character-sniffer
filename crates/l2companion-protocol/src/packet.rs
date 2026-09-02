@@ -310,8 +310,8 @@ impl L2Packet {
     pub fn parse(opcode: u8, payload: &[u8]) -> Self {
         let mut cursor = Cursor::new(payload);
         match opcode {
-            // UserInfo / CharSelected (Opcode 0x04 / 0x0B / 0x15 / 0x32)
-            0x04 | 0x0b | 0x15 | 0x32 => Self::parse_char_selected_retail(&mut cursor)
+            // UserInfo / CharSelected (Opcode 0x04 / 0x0B)
+            0x04 | 0x0b => Self::parse_char_selected_retail(&mut cursor)
                 .map(L2Packet::UserInfo)
                 .unwrap_or(L2Packet::Raw {
                     opcode,
@@ -550,7 +550,13 @@ impl L2Packet {
     /// Parses modern retail CharSelected (Opcode 0x0B)
     fn parse_char_selected_retail(r: &mut Cursor<&[u8]>) -> Result<UserInfoPacket, std::io::Error> {
         let name = read_l2_string(r)?;
+        if name.len() < 2 || name.len() > 32 || !name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == ' ') {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid character name"));
+        }
         let object_id = r.read_u32::<LittleEndian>()?;
+        if object_id == 0 {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid character object_id"));
+        }
         let _padding = r.read_u16::<LittleEndian>().unwrap_or_default();
         let session_id = r.read_u32::<LittleEndian>().unwrap_or_default();
         let _clan_id = r.read_u32::<LittleEndian>().unwrap_or_default();
@@ -558,6 +564,9 @@ impl L2Packet {
         let _sex = r.read_u32::<LittleEndian>().unwrap_or_default();
         let _race = r.read_u32::<LittleEndian>().unwrap_or_default();
         let class_id = r.read_u32::<LittleEndian>().unwrap_or_default();
+        if class_id > 300 {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid class_id"));
+        }
         let _active = r.read_u32::<LittleEndian>().unwrap_or_default();
         let x = r.read_i32::<LittleEndian>().unwrap_or_default();
         let y = r.read_i32::<LittleEndian>().unwrap_or_default();
@@ -567,6 +576,9 @@ impl L2Packet {
         let sp = r.read_u64::<LittleEndian>().map(|v| v as u32).unwrap_or_default();
         let exp = r.read_u64::<LittleEndian>().unwrap_or_default();
         let level = r.read_u32::<LittleEndian>().unwrap_or_default();
+        if level == 0 || level > 130 {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid character level"));
+        }
 
         Ok(UserInfoPacket {
             object_id,
@@ -743,21 +755,25 @@ impl L2Packet {
     }
 
     fn parse_warehouse_list(r: &mut Cursor<&[u8]>, opcode: u8) -> Result<WarehouseListPacket, std::io::Error> {
-        let raw_type = r.read_u16::<LittleEndian>().unwrap_or(1);
+        let raw_type = r.read_u16::<LittleEndian>().unwrap_or(0);
         let wh_type = match raw_type {
             1 => WarehouseType::Private,
             2 => WarehouseType::Clan,
             3 => WarehouseType::Castle,
             4 => WarehouseType::Freight,
-            _ => WarehouseType::Package,
+            5 => WarehouseType::Package,
+            _ => return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid warehouse type")),
         };
         let player_adena = if opcode == 0x42 {
             r.read_u64::<LittleEndian>().or_else(|_| r.read_u32::<LittleEndian>().map(|v| v as u64)).unwrap_or_default()
         } else {
             0
         };
+        if player_adena > 100_000_000_000 {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid warehouse adena"));
+        }
         let count = r.read_u16::<LittleEndian>().map(|c| c as usize).unwrap_or_default();
-        if count > 1000 {
+        if count > 500 {
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Too many warehouse items"));
         }
 
