@@ -111,12 +111,25 @@ pub struct StatusUpdatePacket {
     pub attributes: Vec<StatusUpdateAttribute>,
 }
 
+pub fn item_type_to_name(t: u16) -> &'static str {
+    match t {
+        0 => "Weapon",
+        1 => "Armor",
+        2 => "Accessory",
+        3 => "Quest",
+        4 => "Currency",
+        5 => "EtcItem",
+        _ => "Item",
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, SimpleObject)]
 pub struct ItemInfo {
     pub object_id: u32,
     pub item_id: u32,
     pub count: u64,
     pub item_type: u16,
+    pub item_type_name: String,
     pub equipped: bool,
     pub slot: u32,
     pub enchant_level: u16,
@@ -825,11 +838,27 @@ impl L2Packet {
                 let mana = if buf.len() >= 38 { i32::from_le_bytes([buf[34], buf[35], buf[36], buf[37]]) } else { -1 };
                 let durability = if buf.len() >= 42 { i32::from_le_bytes([buf[38], buf[39], buf[40], buf[41]]) } else { -1 };
 
+                // Resolve item_type: 0=Weapon, 1=Armor, 2=Accessory, 3=Quest, 4=Currency, 5=EtcItem
+                let item_type = if l_type > 0 {
+                    l_type
+                } else if l_item == 57 || l_item == 5575 || l_item == 5560 {
+                    4 // Currency
+                } else if (l_slot & 0x4080) != 0 {
+                    0 // Weapon
+                } else if (l_slot & (0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020)) != 0 {
+                    2 // Accessory
+                } else if (l_slot & (0x0100 | 0x0200 | 0x0400 | 0x0800 | 0x1000 | 0x2000)) != 0 {
+                    1 // Armor
+                } else {
+                    5 // EtcItem
+                };
+
                 return Some(ItemInfo {
                     object_id: l_obj,
                     item_id: l_item,
                     count: l_count,
-                    item_type: l_type,
+                    item_type,
+                    item_type_name: item_type_to_name(item_type).to_string(),
                     equipped,
                     slot: l_slot,
                     enchant_level,
@@ -857,21 +886,49 @@ impl L2Packet {
         let modern_valid = m_item > 0 && m_item < 5_000_000 && m_count > 0 && m_count < 100_000_000_000;
 
         if modern_valid {
-            let item_type = if buf.len() >= 22 { u16::from_le_bytes([buf[20], buf[21]]) } else { 0 };
+            let item_type_raw = if buf.len() >= 22 { u16::from_le_bytes([buf[20], buf[21]]) } else { 0 };
             let custom_type1 = if buf.len() >= 24 { u16::from_le_bytes([buf[22], buf[23]]) } else { 0 };
             let equipped = if buf.len() >= 26 { u16::from_le_bytes([buf[24], buf[25]]) != 0 } else { false };
-            let _body_part = if buf.len() >= 30 { u32::from_le_bytes([buf[26], buf[27], buf[28], buf[29]]) } else { 0 };
+            let body_part = if buf.len() >= 30 { u32::from_le_bytes([buf[26], buf[27], buf[28], buf[29]]) } else { 0 };
             let enchant_level = if buf.len() >= 32 { u16::from_le_bytes([buf[30], buf[31]]) } else { 0 };
             let custom_type2 = if buf.len() >= 34 { u16::from_le_bytes([buf[32], buf[33]]) } else { 0 };
             let is_augmented = if buf.len() >= 38 { u32::from_le_bytes([buf[34], buf[35], buf[36], buf[37]]) != 0 } else { false };
             let mana = if buf.len() >= 42 { i32::from_le_bytes([buf[38], buf[39], buf[40], buf[41]]) } else { -1 };
             let durability = if buf.len() >= 46 { i32::from_le_bytes([buf[42], buf[43], buf[44], buf[45]]) } else { -1 };
 
+            // Resolve item_type: 0=Weapon, 1=Shield/Armor, 2=Accessory/Jewelry, 3=Quest, 4=Currency, 5=EtcItem/Consumable
+            let item_type = if item_type_raw > 0 {
+                item_type_raw
+            } else if m_item == 57 || m_item == 5575 || m_item == 5560 || m_item == 37000 || m_item == 40000 {
+                4 // Currency (Adena / L-Coin)
+            } else if body_part != 0 {
+                if (body_part & 0x4080) != 0 {
+                    0 // Weapon (R_HAND, LR_HAND)
+                } else if (body_part & (0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020 | 0x100000 | 0x200000 | 0x400000)) != 0 {
+                    2 // Jewelry / Accessory (EAR, NECK, FINGER, HAIR)
+                } else if (body_part & (0x0100 | 0x0200 | 0x0400 | 0x0800 | 0x1000 | 0x2000 | 0x8000 | 0x10000 | 0x20000)) != 0 {
+                    1 // Shield / Armor (CHEST, LEGS, GLOVES, FEET, HELM, CLOAK, BELT)
+                } else {
+                    0
+                }
+            } else if m_slot > 0 && equipped {
+                if (m_slot & 0x4080) != 0 {
+                    0 // Weapon
+                } else if (m_slot & (0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020)) != 0 {
+                    2 // Jewelry
+                } else {
+                    1 // Armor
+                }
+            } else {
+                5 // EtcItem / Consumable
+            };
+
             return Some(ItemInfo {
                 object_id: m_obj,
                 item_id: m_item,
                 count: m_count,
                 item_type,
+                item_type_name: item_type_to_name(item_type).to_string(),
                 equipped,
                 slot: m_slot,
                 enchant_level,
@@ -888,6 +945,7 @@ impl L2Packet {
             item_id: m_item,
             count: if m_count > 0 && m_count < 100_000_000_000 { m_count } else { 1 },
             item_type: 0,
+            item_type_name: item_type_to_name(0).to_string(),
             equipped: false,
             slot: m_slot,
             enchant_level: 0,
