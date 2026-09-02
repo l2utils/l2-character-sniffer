@@ -22,10 +22,13 @@ l2companion-service = { path = "crates/l2companion-service" }
 
 # Async & Networking
 tokio = { version = "1.43", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
 futures-util = "0.3"
 pcap = "2.2"
 pcap-file = "2.0"
 axum = { version = "0.8", features = ["ws"] }
+async-graphql = { version = "7.0", features = ["chrono"] }
+async-graphql-axum = "7.0"
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 http-body-util = "0.1"

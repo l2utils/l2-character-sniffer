@@ -1,14 +1,16 @@
-//! Embedded REST and WebSocket API Server for live telemetry telemetry.
+//! Embedded GraphQL, REST, and WebSocket API Server for live telemetry telemetry.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use async_graphql::http::GraphiQLSource;
+use async_graphql_axum::{GraphQLRequest, GraphQLResponse, GraphQLSubscription};
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         Path, State,
     },
     http::StatusCode,
-    response::Response,
+    response::{Html, IntoResponse, Response},
     routing::get,
     Json, Router,
 };
@@ -16,6 +18,7 @@ use futures_util::{SinkExt, StreamExt};
 use tower_http::cors::{Any, CorsLayer};
 use tracing::{error, info};
 
+use crate::graphql::{build_schema, AppSchema};
 use crate::model::{
     AccountSession, BuffEffect, Character, CommissionItem, EinhasadProduct, InventoryItem,
     MarketState, PrivateStoreSession, SkillEntry, WorldExchangeItem,
@@ -26,18 +29,30 @@ use crate::state::CharacterTracker;
 #[derive(Clone)]
 pub struct AppState {
     pub tracker: Arc<CharacterTracker>,
+    pub schema: AppSchema,
 }
 
-/// Creates the Axum router with all REST and WebSocket routes and CORS enabled.
+/// Creates the Axum router with GraphQL, GraphiQL playground, REST, and WebSocket routes.
 pub fn create_router(tracker: Arc<CharacterTracker>) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
         .allow_headers(Any);
 
-    let state = AppState { tracker };
+    let schema = build_schema(tracker.clone());
+    let state = AppState {
+        tracker,
+        schema: schema.clone(),
+    };
 
     Router::new()
+        // Interactive GraphiQL IDE
+        .route("/", get(graphiql_handler))
+        .route("/graphiql", get(graphiql_handler))
+        .route("/graphql", get(graphiql_handler).post(graphql_handler))
+        // GraphQL WebSocket Subscriptions
+        .route_service("/graphql/ws", GraphQLSubscription::new(schema))
+        // REST Endpoints
         .route("/api/accounts", get(list_accounts))
         .route("/api/characters", get(list_characters))
         .route("/api/characters/{id}", get(get_character))
@@ -50,6 +65,7 @@ pub fn create_router(tracker: Arc<CharacterTracker>) -> Router {
         .route("/api/markets/commission", get(get_commission_items))
         .route("/api/markets/world-exchange", get(get_world_exchange))
         .route("/api/markets/einhasad", get(get_einhasad_products))
+        // Raw Event WebSocket Stream
         .route("/ws", get(ws_handler))
         .layer(cors)
         .with_state(state)
@@ -65,8 +81,9 @@ pub async fn start_api_server(
     let listener = tokio::net::TcpListener::bind(addr).await?;
     let local_addr = listener.local_addr()?;
 
-    info!("🚀 Telemetry Telemetry API Server listening on http://{}", local_addr);
-    info!("📡 WebSocket stream active at ws://{}/ws", local_addr);
+    info!("🚀 GraphQL & REST API Server listening on http://{}", local_addr);
+    info!("🧭 GraphiQL Interactive IDE active at http://{}/", local_addr);
+    info!("📡 GraphQL WebSocket subscriptions active at ws://{}/graphql/ws", local_addr);
 
     let handle = tokio::spawn(async move {
         if let Err(e) = axum::serve(listener, app).await {
@@ -75,6 +92,25 @@ pub async fn start_api_server(
     });
 
     Ok((local_addr, handle))
+}
+
+// =================== GraphQL Route Handlers ===================
+
+async fn graphql_handler(
+    State(state): State<AppState>,
+    req: GraphQLRequest,
+) -> GraphQLResponse {
+    state.schema.execute(req.into_inner()).await.into()
+}
+
+async fn graphiql_handler() -> impl IntoResponse {
+    Html(
+        GraphiQLSource::build()
+            .endpoint("/graphql")
+            .subscription_endpoint("/graphql/ws")
+            .title("Lineage 2 Character Telemetry - GraphQL Explorer")
+            .finish(),
+    )
 }
 
 // =================== REST Route Handlers ===================
@@ -260,5 +296,30 @@ mod tests {
         let char_info: Character = serde_json::from_slice(&body).unwrap();
         assert_eq!(char_info.object_id, 5001);
         assert_eq!(char_info.level, 80);
+
+        // Test GET / (GraphiQL HTML)
+        let response = app.clone().oneshot(
+            Request::builder().uri("/").body(Body::empty()).unwrap()
+        ).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // Test POST /graphql (Query)
+        let gql_body = serde_json::json!({
+            "query": "{ characters { name level } accounts { accountName } }"
+        });
+        let response = app.clone().oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/graphql")
+                .header("Content-Type", "application/json")
+                .body(Body::from(serde_json::to_vec(&gql_body).unwrap()))
+                .unwrap()
+        ).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let gql_res: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(gql_res["data"]["characters"][0]["name"], "TestHero");
+        assert_eq!(gql_res["data"]["characters"][0]["level"], 80);
+        assert_eq!(gql_res["data"]["accounts"][0]["accountName"], "TestAccount");
     }
 }
