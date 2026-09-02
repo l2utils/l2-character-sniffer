@@ -95,14 +95,20 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Devices => {
-            println!("Enumerating network capture interfaces:\n");
+            println!("Enumerating network capture interfaces (detecting physical NICs & live traffic)...\n");
+            let default_dev = l2companion_capture::default_device().ok().flatten();
             match list_devices() {
                 Ok(devices) => {
                     if devices.is_empty() {
                         println!("No network interfaces found. (Is Npcap installed and running?)");
                     }
                     for (i, dev) in devices.into_iter().enumerate() {
-                        println!("{}. Device: {}", i + 1, dev.name);
+                        let is_default = default_dev.as_ref().map(|d| d.name == dev.name).unwrap_or(false);
+                        let star = if is_default { " ⭐ [RECOMMENDED]" } else { "" };
+                        let nic_type = if dev.is_physical { "[Physical NIC]" } else { "[Virtual/WAN]" };
+
+                        println!("{}. Device: {}{}", i + 1, dev.name, star);
+                        println!("   Type:        {}", nic_type);
                         if let Some(desc) = dev.description {
                             println!("   Description: {}", desc);
                         }
@@ -155,30 +161,54 @@ impl std::fmt::Display for DeviceOption {
 }
 
 fn prompt_for_device() -> Result<Option<String>> {
-    let devices = list_devices()?;
+    let mut devices = list_devices()?;
     if devices.is_empty() {
         return Ok(None);
     }
 
+    // Detect best physical NIC with live traffic
     let default_dev = l2companion_capture::default_device().ok().flatten();
-    let mut default_idx = 0;
+
+    // Sort devices: Default first, then other physical NICs, then virtual/WAN
+    devices.sort_by_key(|dev| {
+        if default_dev.as_ref().map(|d| d.name == dev.name).unwrap_or(false) {
+            0
+        } else if dev.is_physical {
+            1
+        } else {
+            2
+        }
+    });
+
+    let default_idx = 0;
 
     let options: Vec<DeviceOption> = devices
         .iter()
-        .enumerate()
-        .map(|(i, dev)| {
+        .map(|dev| {
             let is_default = default_dev.as_ref().map(|d| d.name == dev.name).unwrap_or(false);
-            if is_default {
-                default_idx = i;
-            }
             let desc = dev.description.as_deref().unwrap_or("Network Adapter");
             let ips = if dev.addresses.is_empty() {
                 "No IP".to_string()
             } else {
                 dev.addresses.join(", ")
             };
-            let tag = if is_default { " ⭐ [ACTIVE]" } else { "" };
-            let label = format!("{:<40} | {:<25}{}", desc, ips, tag);
+            let tag = if is_default {
+                if let Some(ref d) = default_dev {
+                    if d.recent_packet_count > 0 {
+                        format!(" ⭐ [ACTIVE - {} pkts/sec]", d.recent_packet_count * 10)
+                    } else {
+                        " ⭐ [PRIMARY NIC]".to_string()
+                    }
+                } else {
+                    " ⭐ [PRIMARY NIC]".to_string()
+                }
+            } else if dev.is_physical {
+                " [Physical]".to_string()
+            } else {
+                "".to_string()
+            };
+
+            let label = format!("{:<42} | {:<22}{}", desc, ips, tag);
             DeviceOption {
                 name: dev.name.clone(),
                 label,
