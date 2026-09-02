@@ -114,3 +114,18 @@ cargo clippy --workspace --all-targets -- -D warnings
 1. **Verify Before Finishing**: Always ensure `cargo test --workspace` and `cargo fmt --check` pass after making code changes.
 2. **Preserve Architectural Purity**: Keep `l2-sniffer-protocol` strictly zero-IO and platform-agnostic.
 3. **Documentation**: Update docstrings and keep `README.md` in sync when introducing new CLI flags, GraphQL queries, or packet decoders.
+
+---
+
+## 6. Pull Request & Git Guidelines
+
+### PR Structure & Standards
+* Every PR must follow structured markdown formatting with clear sections:
+  - `## Summary`: High-level explanation of the problem and resolution.
+  - `## Changes`: Bulleted breakdown of modifications grouped by crate or file.
+  - `## Verification`: Concrete verification steps with exact command lines and results.
+
+### PR Creation & Shell Safety
+* **Avoid Shell Escaping Bugs**: When creating or editing pull requests with the GitHub CLI (`gh pr create` or `gh pr edit`), **always use `--body-file <path>`** instead of passing multiline strings via `--body "..."`. Inline shell arguments (especially in PowerShell/Windows) often introduce stray backslashes before backticks (e.g. `\`file\``) or asterisks.
+* Always verify formatting after creating/updating a PR with `gh pr view <number>` to ensure headers, code blocks, lists, and bold text render cleanly on GitHub.
+

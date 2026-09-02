@@ -18,3 +18,5 @@ For detailed architecture, workflow, and crate layering documentation, refer to 
 - **Verification**: Always run `cargo test --workspace` and `cargo fmt --check` before finalizing tasks.
 - **Error Handling**: Use `thiserror` in libraries (`protocol`, `capture`, `core`) and `anyhow` in binary (`cli`).
 - **Packet Parsers**: Never panic on unexpected byte sequences; return structured errors or fallback to `L2Packet::Raw`.
+- **PR Description Formatting**: Always use `gh pr create/edit --body-file <path>` instead of inline shell strings to prevent markdown escape artifacts. Include structured `## Summary`, `## Changes`, and `## Verification` sections.
+
