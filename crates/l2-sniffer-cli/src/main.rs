@@ -3,6 +3,7 @@
 //! Command line tool to inspect network interfaces, capture packets, and monitor multi-client character statistics live.
 
 use std::collections::HashMap;
+use std::io::Write;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use anyhow::Result;
@@ -138,25 +139,69 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+fn prompt_for_device() -> Result<Option<String>> {
+    let devices = list_devices()?;
+    if devices.is_empty() {
+        return Ok(None);
+    }
+
+    println!("\nAvailable network capture interfaces:");
+    let default_dev = l2_sniffer_capture::default_device().ok().flatten();
+    let mut default_idx = 1;
+
+    for (i, dev) in devices.iter().enumerate() {
+        let is_default = default_dev.as_ref().map(|d| d.name == dev.name).unwrap_or(false);
+        if is_default {
+            default_idx = i + 1;
+        }
+        let desc = dev.description.as_deref().unwrap_or("Network Adapter");
+        let ips = if dev.addresses.is_empty() {
+            "-".to_string()
+        } else {
+            dev.addresses.join(", ")
+        };
+        let marker = if is_default { " -> [RECOMMENDED]" } else { "" };
+        println!("  [{}] {}{} \n      IPs: {}", i + 1, desc, marker, ips);
+    }
+
+    print!("\nSelect interface to listen to [1-{}] (Press Enter for [{}]): ", devices.len(), default_idx);
+    std::io::stdout().flush()?;
+
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input)?;
+    let trimmed = input.trim();
+
+    if trimmed.is_empty() {
+        Ok(Some(default_idx.to_string()))
+    } else {
+        Ok(Some(trimmed.to_string()))
+    }
+}
+
 async fn run_capture_session(
     device: Option<String>,
     pcap: Option<String>,
     filter: Option<String>,
     port: Option<u16>,
 ) -> Result<()> {
-    println!("Initializing Lineage 2 Sniffer...");
     let mut builder = SnifferBuilder::new();
 
-    if let Some(d) = device {
-        builder = builder.device(d);
-    }
     if let Some(p) = pcap {
         builder = builder.pcap_file(p);
+    } else if let Some(d) = device {
+        builder = builder.device(d);
+    } else {
+        // Prompt user to select an interface interactively
+        if let Some(selected) = prompt_for_device()? {
+            builder = builder.device(selected);
+        }
     }
+
     if let Some(f) = filter {
         builder = builder.filter(f);
     }
 
+    println!("\nInitializing Lineage 2 Sniffer...");
     let session = builder.build()?;
     println!("📡 Capture Source: {}", session.source_description());
 
