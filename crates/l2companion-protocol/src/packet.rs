@@ -646,36 +646,86 @@ impl L2Packet {
     }
 
     fn parse_item_list(r: &mut Cursor<&[u8]>) -> Result<ItemListPacket, std::io::Error> {
-        let show_window = r.read_u8().map(|b| b != 0).unwrap_or(true);
-        let count = r.read_u16::<LittleEndian>().map(|c| c as usize).or_else(|_| r.read_u32::<LittleEndian>().map(|c| c as usize))?;
-        if count > 500 {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Too many items"));
+        let raw_buf = *r.get_ref();
+        let start_pos = r.position() as usize;
+        let slice = if start_pos < raw_buf.len() { &raw_buf[start_pos..] } else { raw_buf };
+
+        if slice.len() < 3 {
+            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "ItemList payload too short"));
         }
-        let mut items = Vec::with_capacity(count);
-        for _ in 0..count {
-            if let Ok(item) = Self::read_item_entry(r) {
-                items.push(item);
-            } else {
-                break;
+
+        // Try candidate header layouts:
+        // Layout A: show_window (u8), count (u16) -> offset 3
+        // Layout B: show_window (u8), sub_flag (u8), count (u16) -> offset 4
+        // Layout C: show_window (u16), count (u16) -> offset 4
+        // Layout D: show_window (u8), count (u32) -> offset 5
+        let mut best_show_window = true;
+        let mut best_count = 0usize;
+        let mut best_offset = 3usize;
+
+        // Try Layout B / C (offset 4)
+        if slice.len() >= 4 {
+            let cnt_b = u16::from_le_bytes([slice[2], slice[3]]) as usize;
+            if cnt_b > 0 && cnt_b <= 500 {
+                let remaining = slice.len() - 4;
+                if remaining >= cnt_b && (remaining % cnt_b == 0 || (remaining / cnt_b >= 32 && remaining / cnt_b <= 96)) {
+                    best_show_window = slice[0] != 0;
+                    best_count = cnt_b;
+                    best_offset = 4;
+                }
             }
         }
-        Ok(ItemListPacket { show_window, items })
+
+        // Try Layout A (offset 3) if Layout B didn't match cleanly
+        if best_count == 0 && slice.len() >= 3 {
+            let cnt_a = u16::from_le_bytes([slice[1], slice[2]]) as usize;
+            if cnt_a > 0 && cnt_a <= 500 {
+                let remaining = slice.len() - 3;
+                if remaining >= cnt_a && (remaining % cnt_a == 0 || (remaining / cnt_a >= 32 && remaining / cnt_a <= 96)) {
+                    best_show_window = slice[0] != 0;
+                    best_count = cnt_a;
+                    best_offset = 3;
+                }
+            }
+        }
+
+        if best_count == 0 {
+            // Fallback: read u8 show_window, u16 count
+            best_show_window = slice[0] != 0;
+            best_count = u16::from_le_bytes([slice[1], slice[2]]) as usize;
+            best_offset = 3;
+        }
+
+        if best_count > 500 {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Too many items in ItemList"));
+        }
+
+        let item_payload = &slice[best_offset..];
+        let items = Self::parse_item_array(item_payload, best_count);
+
+        Ok(ItemListPacket {
+            show_window: best_show_window,
+            items,
+        })
     }
 
     fn parse_inventory_update(r: &mut Cursor<&[u8]>) -> Result<InventoryUpdatePacket, std::io::Error> {
-        let count = r.read_u16::<LittleEndian>().map(|c| c as usize).or_else(|_| r.read_u32::<LittleEndian>().map(|c| c as usize))?;
+        let raw_buf = *r.get_ref();
+        let start_pos = r.position() as usize;
+        let slice = if start_pos < raw_buf.len() { &raw_buf[start_pos..] } else { raw_buf };
+
+        if slice.len() < 2 {
+            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "InventoryUpdate payload too short"));
+        }
+
+        let count = u16::from_le_bytes([slice[0], slice[1]]) as usize;
         if count > 500 {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Too many items in inventory update"));
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Too many items in InventoryUpdate"));
         }
-        let mut items = Vec::with_capacity(count);
-        for _ in 0..count {
-            let _update_type = r.read_u16::<LittleEndian>().unwrap_or(1);
-            if let Ok(item) = Self::read_item_entry(r) {
-                items.push(item);
-            } else {
-                break;
-            }
-        }
+
+        let item_payload = &slice[2..];
+        let items = Self::parse_item_array(item_payload, count);
+
         Ok(InventoryUpdatePacket { items })
     }
 
@@ -693,18 +743,16 @@ impl L2Packet {
         } else {
             0
         };
-        let count = r.read_u16::<LittleEndian>().map(|c| c as usize).or_else(|_| r.read_u32::<LittleEndian>().map(|c| c as usize))?;
+        let count = r.read_u16::<LittleEndian>().map(|c| c as usize).unwrap_or_default();
         if count > 1000 {
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Too many warehouse items"));
         }
-        let mut items = Vec::with_capacity(count);
-        for _ in 0..count {
-            if let Ok(item) = Self::read_item_entry(r) {
-                items.push(item);
-            } else {
-                break;
-            }
-        }
+
+        let raw_buf = *r.get_ref();
+        let pos = r.position() as usize;
+        let item_payload = if pos < raw_buf.len() { &raw_buf[pos..] } else { &[] };
+        let items = Self::parse_item_array(item_payload, count);
+
         Ok(WarehouseListPacket {
             wh_type,
             player_adena,
@@ -712,34 +760,141 @@ impl L2Packet {
         })
     }
 
-    fn read_item_entry(r: &mut Cursor<&[u8]>) -> Result<ItemInfo, std::io::Error> {
-        let item_type = r.read_u16::<LittleEndian>().unwrap_or(0);
-        let object_id = r.read_u32::<LittleEndian>()?;
-        let item_id = r.read_u32::<LittleEndian>()?;
-        let slot = r.read_u32::<LittleEndian>().unwrap_or(0);
-        let count = r.read_u64::<LittleEndian>().or_else(|_| r.read_u32::<LittleEndian>().map(|c| c as u64)).unwrap_or(1);
-        let _item_type2 = r.read_u16::<LittleEndian>().unwrap_or(0);
-        let custom_type1 = r.read_u16::<LittleEndian>().unwrap_or(0);
-        let equipped = r.read_u16::<LittleEndian>().map(|v| v != 0).unwrap_or(false);
-        let _body_part = r.read_u32::<LittleEndian>().unwrap_or(0);
-        let enchant_level = r.read_u16::<LittleEndian>().unwrap_or(0);
-        let custom_type2 = r.read_u16::<LittleEndian>().unwrap_or(0);
-        let is_augmented = r.read_u32::<LittleEndian>().map(|v| v != 0).unwrap_or(false);
-        let mana = r.read_i32::<LittleEndian>().unwrap_or(-1);
-        let durability = r.read_i32::<LittleEndian>().unwrap_or(-1);
+    /// Parses a contiguous slice of N items using calculated stride and chronicle detection.
+    fn parse_item_array(payload: &[u8], count: usize) -> Vec<ItemInfo> {
+        if count == 0 || payload.is_empty() {
+            return Vec::new();
+        }
 
-        Ok(ItemInfo {
-            object_id,
-            item_id,
-            count,
-            item_type,
-            equipped,
-            slot,
-            enchant_level,
-            custom_type1: custom_type1 | custom_type2,
-            is_augmented,
-            mana,
-            durability,
+        let calculated_stride = payload.len() / count;
+        // Standard item strides in L2: 22 (legacy minimal), 36 (C4), 42 (Interlude), 56 (Gracia), 64 (HF), 68/70/72 (Essence/Modern)
+        let stride = if calculated_stride >= 18 && calculated_stride <= 128 {
+            calculated_stride
+        } else {
+            56
+        };
+
+        let mut items = Vec::with_capacity(count);
+
+        for i in 0..count {
+            let start = i * stride;
+            let end = (start + stride).min(payload.len());
+            if start >= payload.len() || end <= start {
+                break;
+            }
+            let item_buf = &payload[start..end];
+            if let Some(item) = Self::parse_single_item(item_buf) {
+                items.push(item);
+            }
+        }
+
+        items
+    }
+
+    /// Parses an individual item binary buffer into ItemInfo.
+    fn parse_single_item(buf: &[u8]) -> Option<ItemInfo> {
+        if buf.len() < 16 {
+            return None;
+        }
+
+        // 1. Check Legacy format: item_type1 (u16 @ 0), object_id (u32 @ 2), item_id (u32 @ 6), slot (u32 @ 10), count (u32/u64 @ 14)
+        if buf.len() >= 22 {
+            let l_type = u16::from_le_bytes([buf[0], buf[1]]);
+            let l_obj = u32::from_le_bytes([buf[2], buf[3], buf[4], buf[5]]);
+            let l_item = u32::from_le_bytes([buf[6], buf[7], buf[8], buf[9]]);
+            let l_slot = u32::from_le_bytes([buf[10], buf[11], buf[12], buf[13]]);
+            let l_count = if buf.len() >= 26 {
+                u64::from_le_bytes([
+                    buf[14], buf[15], buf[16], buf[17],
+                    buf[18], buf[19], buf[20], buf[21],
+                ])
+            } else {
+                u32::from_le_bytes([buf[14], buf[15], buf[16], buf[17]]) as u64
+            };
+
+            // If legacy item_type1 is 0..3, and l_item is a valid item ID, and m_item has 0 in lower 16 bits (due to shift)
+            let m_item_raw = if buf.len() >= 8 { u32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]) } else { 0 };
+            let is_legacy = l_type <= 3 && l_item > 0 && l_item < 5_000_000 && l_count > 0 && l_count < 100_000_000_000
+                && (m_item_raw & 0xFFFF == 0 || (m_item_raw > 1_000_000 && l_item < 100_000));
+
+            if is_legacy {
+                let custom_type1 = if buf.len() >= 20 { u16::from_le_bytes([buf[18], buf[19]]) } else { 0 };
+                let equipped = if buf.len() >= 22 { u16::from_le_bytes([buf[20], buf[21]]) != 0 } else { false };
+                let enchant_level = if buf.len() >= 28 { u16::from_le_bytes([buf[26], buf[27]]) } else { 0 };
+                let is_augmented = if buf.len() >= 34 { u32::from_le_bytes([buf[30], buf[31], buf[32], buf[33]]) != 0 } else { false };
+                let mana = if buf.len() >= 38 { i32::from_le_bytes([buf[34], buf[35], buf[36], buf[37]]) } else { -1 };
+                let durability = if buf.len() >= 42 { i32::from_le_bytes([buf[38], buf[39], buf[40], buf[41]]) } else { -1 };
+
+                return Some(ItemInfo {
+                    object_id: l_obj,
+                    item_id: l_item,
+                    count: l_count,
+                    item_type: l_type,
+                    equipped,
+                    slot: l_slot,
+                    enchant_level,
+                    custom_type1,
+                    is_augmented,
+                    mana,
+                    durability,
+                });
+            }
+        }
+
+        // 2. Modern format: object_id (u32 @ 0), item_id (u32 @ 4), slot (u32 @ 8), count (u64 @ 12)
+        let m_obj = u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]);
+        let m_item = u32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]);
+        let m_slot = u32::from_le_bytes([buf[8], buf[9], buf[10], buf[11]]);
+        let m_count = if buf.len() >= 20 {
+            u64::from_le_bytes([
+                buf[12], buf[13], buf[14], buf[15],
+                buf[16], buf[17], buf[18], buf[19],
+            ])
+        } else {
+            u32::from_le_bytes([buf[12], buf[13], buf[14], buf[15]]) as u64
+        };
+
+        let modern_valid = m_item > 0 && m_item < 5_000_000 && m_count > 0 && m_count < 100_000_000_000;
+
+        if modern_valid {
+            let item_type = if buf.len() >= 22 { u16::from_le_bytes([buf[20], buf[21]]) } else { 0 };
+            let custom_type1 = if buf.len() >= 24 { u16::from_le_bytes([buf[22], buf[23]]) } else { 0 };
+            let equipped = if buf.len() >= 26 { u16::from_le_bytes([buf[24], buf[25]]) != 0 } else { false };
+            let _body_part = if buf.len() >= 30 { u32::from_le_bytes([buf[26], buf[27], buf[28], buf[29]]) } else { 0 };
+            let enchant_level = if buf.len() >= 32 { u16::from_le_bytes([buf[30], buf[31]]) } else { 0 };
+            let custom_type2 = if buf.len() >= 34 { u16::from_le_bytes([buf[32], buf[33]]) } else { 0 };
+            let is_augmented = if buf.len() >= 38 { u32::from_le_bytes([buf[34], buf[35], buf[36], buf[37]]) != 0 } else { false };
+            let mana = if buf.len() >= 42 { i32::from_le_bytes([buf[38], buf[39], buf[40], buf[41]]) } else { -1 };
+            let durability = if buf.len() >= 46 { i32::from_le_bytes([buf[42], buf[43], buf[44], buf[45]]) } else { -1 };
+
+            return Some(ItemInfo {
+                object_id: m_obj,
+                item_id: m_item,
+                count: m_count,
+                item_type,
+                equipped,
+                slot: m_slot,
+                enchant_level,
+                custom_type1: custom_type1 | custom_type2,
+                is_augmented,
+                mana,
+                durability,
+            });
+        }
+
+        // Fallback: modern
+        Some(ItemInfo {
+            object_id: m_obj,
+            item_id: m_item,
+            count: if m_count > 0 && m_count < 100_000_000_000 { m_count } else { 1 },
+            item_type: 0,
+            equipped: false,
+            slot: m_slot,
+            enchant_level: 0,
+            custom_type1: 0,
+            is_augmented: false,
+            mana: -1,
+            durability: -1,
         })
     }
 
@@ -1169,6 +1324,50 @@ mod tests {
                 assert_eq!(auth.session_key2, 88888);
             }
             _ => panic!("Expected AuthLogin packet"),
+        }
+    }
+
+    #[test]
+    fn test_parse_item_list_modern() {
+        let mut data = Vec::new();
+        data.push(1); // show_window = true
+        data.push(0); // sub_flag / block_mode
+        data.extend_from_slice(&(2u16).to_le_bytes()); // count = 2
+
+        // Item 1: Adena (64 bytes stride)
+        let mut item1 = vec![0u8; 64];
+        item1[0..4].copy_from_slice(&(268435456u32).to_le_bytes()); // object_id
+        item1[4..8].copy_from_slice(&(57u32).to_le_bytes()); // item_id = 57 (Adena)
+        item1[8..12].copy_from_slice(&(0u32).to_le_bytes()); // slot
+        item1[12..20].copy_from_slice(&(15000000u64).to_le_bytes()); // count = 15,000,000
+        data.extend_from_slice(&item1);
+
+        // Item 2: Weapon (e.g. Damascus Sword +4)
+        let mut item2 = vec![0u8; 64];
+        item2[0..4].copy_from_slice(&(268435457u32).to_le_bytes()); // object_id
+        item2[4..8].copy_from_slice(&(72u32).to_le_bytes()); // item_id = 72
+        item2[8..12].copy_from_slice(&(128u32).to_le_bytes()); // slot
+        item2[12..20].copy_from_slice(&(1u64).to_le_bytes()); // count = 1
+        item2[24..26].copy_from_slice(&(1u16).to_le_bytes()); // equipped = true
+        item2[30..32].copy_from_slice(&(4u16).to_le_bytes()); // enchant = +4
+        data.extend_from_slice(&item2);
+
+        let packet = L2Packet::parse(0x11, &data);
+        match packet {
+            L2Packet::ItemList(il) => {
+                assert_eq!(il.items.len(), 2);
+                assert_eq!(il.items[0].object_id, 268435456);
+                assert_eq!(il.items[0].item_id, 57);
+                assert_eq!(il.items[0].count, 15000000);
+                assert!(!il.items[0].equipped);
+
+                assert_eq!(il.items[1].object_id, 268435457);
+                assert_eq!(il.items[1].item_id, 72);
+                assert_eq!(il.items[1].count, 1);
+                assert_eq!(il.items[1].enchant_level, 4);
+                assert!(il.items[1].equipped);
+            }
+            _ => panic!("Expected ItemList packet"),
         }
     }
 }
