@@ -4,8 +4,10 @@
 
 pub mod event;
 pub mod model;
+pub mod server;
 pub mod state;
 
 pub use event::SnifferEvent;
-pub use model::{Character, InventoryItem, Location, Stats, Vitals};
+pub use model::*;
+pub use server::{create_router, start_api_server};
 pub use state::CharacterTracker;

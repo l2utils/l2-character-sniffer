@@ -4,12 +4,19 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use l2_sniffer_protocol::{AuthLoginPacket, CharSelectInfoPacket, L2Packet, UserInfoPacket};
+use l2_sniffer_protocol::{
+    AuthLoginPacket, CharSelectInfoPacket, CommissionListPacket, EinhasadStorePacket,
+    InventoryUpdatePacket, ItemListPacket, L2Packet, PrivateStorePacket, SkillListPacket,
+    UserInfoPacket, WarehouseListPacket, WorldExchangeListPacket,
+};
 use tokio::sync::{broadcast, RwLock};
 use tracing::info;
 
 use crate::event::SnifferEvent;
-use crate::model::{AccountSession, Character, Location};
+use crate::model::{
+    AccountSession, BuffEffect, Character, CommissionItem, EinhasadProduct, InventoryItem,
+    Location, MarketState, PrivateStoreSession, SkillEntry, WorldExchangeItem,
+};
 
 /// Shared thread-safe tracker state across all client sessions and accounts.
 #[derive(Clone)]
@@ -18,6 +25,7 @@ pub struct CharacterTracker {
     client_to_object: Arc<RwLock<HashMap<SocketAddr, u32>>>,
     client_to_account: Arc<RwLock<HashMap<SocketAddr, String>>>,
     accounts: Arc<RwLock<HashMap<String, AccountSession>>>,
+    market: Arc<RwLock<MarketState>>,
     active_player_id: Arc<RwLock<Option<u32>>>,
     event_tx: broadcast::Sender<SnifferEvent>,
 }
@@ -30,12 +38,13 @@ impl Default for CharacterTracker {
 
 impl CharacterTracker {
     pub fn new() -> Self {
-        let (event_tx, _) = broadcast::channel(512);
+        let (event_tx, _) = broadcast::channel(1024);
         Self {
             characters: Arc::new(RwLock::new(HashMap::new())),
             client_to_object: Arc::new(RwLock::new(HashMap::new())),
             client_to_account: Arc::new(RwLock::new(HashMap::new())),
             accounts: Arc::new(RwLock::new(HashMap::new())),
+            market: Arc::new(RwLock::new(MarketState::default())),
             active_player_id: Arc::new(RwLock::new(None)),
             event_tx,
         }
@@ -50,6 +59,18 @@ impl CharacterTracker {
     pub async fn get_characters(&self) -> Vec<Character> {
         let chars = self.characters.read().await;
         chars.values().cloned().collect()
+    }
+
+    /// Retrieve character by object ID.
+    pub async fn get_character_by_id(&self, object_id: u32) -> Option<Character> {
+        let chars = self.characters.read().await;
+        chars.get(&object_id).cloned()
+    }
+
+    /// Retrieve character by name.
+    pub async fn get_character_by_name(&self, name: &str) -> Option<Character> {
+        let chars = self.characters.read().await;
+        chars.values().find(|c| c.name.eq_ignore_ascii_case(name)).cloned()
     }
 
     /// Retrieve snapshot of all detected account sessions.
@@ -67,6 +88,60 @@ impl CharacterTracker {
         } else {
             None
         }
+    }
+
+    /// Retrieve character skills.
+    pub async fn get_character_skills(&self, object_id: u32) -> Vec<SkillEntry> {
+        let chars = self.characters.read().await;
+        chars.get(&object_id).map(|c| c.skills.clone()).unwrap_or_default()
+    }
+
+    /// Retrieve character buffs.
+    pub async fn get_character_buffs(&self, object_id: u32) -> Vec<BuffEffect> {
+        let chars = self.characters.read().await;
+        chars.get(&object_id).map(|c| c.buffs.clone()).unwrap_or_default()
+    }
+
+    /// Retrieve character inventory.
+    pub async fn get_character_inventory(&self, object_id: u32) -> Vec<InventoryItem> {
+        let chars = self.characters.read().await;
+        chars.get(&object_id).map(|c| c.inventory.clone()).unwrap_or_default()
+    }
+
+    /// Retrieve character warehouse items.
+    pub async fn get_character_warehouse(&self, object_id: u32) -> Vec<InventoryItem> {
+        let chars = self.characters.read().await;
+        chars.get(&object_id).map(|c| c.warehouse.clone()).unwrap_or_default()
+    }
+
+    /// Retrieve market state snapshot.
+    pub async fn get_market_state(&self) -> MarketState {
+        let m = self.market.read().await;
+        m.clone()
+    }
+
+    /// Retrieve active private stores.
+    pub async fn get_private_stores(&self) -> Vec<PrivateStoreSession> {
+        let m = self.market.read().await;
+        m.private_stores.values().cloned().collect()
+    }
+
+    /// Retrieve commission market listings.
+    pub async fn get_commission_items(&self) -> Vec<CommissionItem> {
+        let m = self.market.read().await;
+        m.commission_items.clone()
+    }
+
+    /// Retrieve world exchange listings.
+    pub async fn get_world_exchange_items(&self) -> Vec<WorldExchangeItem> {
+        let m = self.market.read().await;
+        m.world_exchange_items.clone()
+    }
+
+    /// Retrieve Einhasad store products.
+    pub async fn get_einhasad_products(&self) -> Vec<EinhasadProduct> {
+        let m = self.market.read().await;
+        m.einhasad_products.clone()
     }
 
     /// Registers a new game client connection and emits an event.
@@ -116,6 +191,36 @@ impl CharacterTracker {
             }
             L2Packet::StatusUpdate(update) => {
                 self.handle_status_update(client_addr, update.object_id, &update.attributes, now).await;
+            }
+            L2Packet::ItemList(il) => {
+                self.handle_item_list(client_addr, il, now).await;
+            }
+            L2Packet::InventoryUpdate(iu) => {
+                self.handle_inventory_update(client_addr, iu, now).await;
+            }
+            L2Packet::WarehouseList(wh) => {
+                self.handle_warehouse_list(client_addr, wh, now).await;
+            }
+            L2Packet::SkillList(sl) => {
+                self.handle_skill_list(client_addr, sl, now).await;
+            }
+            L2Packet::AbnormalStatusUpdate(ab) => {
+                self.handle_abnormal_status(client_addr, ab.buffs, now).await;
+            }
+            L2Packet::MagicEffectIcons(me) => {
+                self.handle_abnormal_status(client_addr, me.buffs, now).await;
+            }
+            L2Packet::PrivateStore(ps) => {
+                self.handle_private_store(client_addr, ps, now).await;
+            }
+            L2Packet::CommissionList(cl) => {
+                self.handle_commission_list(cl, now).await;
+            }
+            L2Packet::WorldExchangeList(we) => {
+                self.handle_world_exchange_list(we, now).await;
+            }
+            L2Packet::EinhasadStore(es) => {
+                self.handle_einhasad_store(es, now).await;
             }
             L2Packet::MoveToLocation(mv) => {
                 self.handle_movement(client_addr, mv.object_id, mv.target_x, mv.target_y, mv.target_z, now).await;
@@ -179,19 +284,21 @@ impl CharacterTracker {
                 let mut c_to_a = self.client_to_account.write().await;
                 c_to_a.insert(addr, info.account_name.clone());
             }
-            let mut accs = self.accounts.write().await;
-            let entry = accs.entry(account_name.clone()).or_insert_with(|| AccountSession {
-                account_name: account_name.clone(),
-                client_addr: addr.to_string(),
-                character_roster: Vec::new(),
-                active_character: None,
-                last_seen_epoch_ms: now,
-            });
-            entry.character_roster = info.character_slots.clone();
-            entry.last_seen_epoch_ms = now;
         }
 
-        info!("Character roster for account '{}' with {} characters", account_name, info.character_slots.len());
+        let mut accs = self.accounts.write().await;
+        let entry = accs.entry(account_name.clone()).or_insert_with(|| AccountSession {
+            account_name: account_name.clone(),
+            client_addr: client_addr.map(|a| a.to_string()).unwrap_or_default(),
+            character_roster: Vec::new(),
+            active_character: None,
+            last_seen_epoch_ms: now,
+        });
+
+        entry.character_roster = info.character_slots.clone();
+        entry.last_seen_epoch_ms = now;
+
+        info!("Loaded roster for account '{}': {} characters", account_name, info.character_slots.len());
 
         let _ = self.event_tx.send(SnifferEvent::AccountRosterLoaded {
             client_addr,
@@ -300,6 +407,140 @@ impl CharacterTracker {
         }
     }
 
+    async fn handle_item_list(&self, client_addr: Option<SocketAddr>, il: ItemListPacket, now: u64) {
+        let object_id = self.resolve_client_object_id(client_addr).await;
+        if let Some(obj_id) = object_id {
+            let mut chars = self.characters.write().await;
+            if let Some(c) = chars.get_mut(&obj_id) {
+                c.inventory = il.items.clone();
+                c.last_updated_epoch_ms = now;
+            }
+            let _ = self.event_tx.send(SnifferEvent::InventoryLoaded {
+                client_addr,
+                object_id: obj_id,
+                items: il.items,
+            });
+        }
+    }
+
+    async fn handle_inventory_update(&self, client_addr: Option<SocketAddr>, iu: InventoryUpdatePacket, now: u64) {
+        let object_id = self.resolve_client_object_id(client_addr).await;
+        if let Some(obj_id) = object_id {
+            let mut chars = self.characters.write().await;
+            if let Some(c) = chars.get_mut(&obj_id) {
+                for updated in &iu.items {
+                    if let Some(pos) = c.inventory.iter().position(|i| i.object_id == updated.object_id) {
+                        c.inventory[pos] = updated.clone();
+                    } else {
+                        c.inventory.push(updated.clone());
+                    }
+                }
+                c.last_updated_epoch_ms = now;
+            }
+            let _ = self.event_tx.send(SnifferEvent::InventoryLoaded {
+                client_addr,
+                object_id: obj_id,
+                items: iu.items,
+            });
+        }
+    }
+
+    async fn handle_warehouse_list(&self, client_addr: Option<SocketAddr>, wh: WarehouseListPacket, now: u64) {
+        let object_id = self.resolve_client_object_id(client_addr).await.unwrap_or(0);
+        let mut chars = self.characters.write().await;
+        if let Some(c) = chars.get_mut(&object_id) {
+            c.warehouse = wh.items.clone();
+            c.last_updated_epoch_ms = now;
+        }
+        let _ = self.event_tx.send(SnifferEvent::WarehouseLoaded {
+            client_addr,
+            object_id,
+            wh_type: wh.wh_type,
+            player_adena: wh.player_adena,
+            items: wh.items,
+        });
+    }
+
+    async fn handle_skill_list(&self, client_addr: Option<SocketAddr>, sl: SkillListPacket, now: u64) {
+        let object_id = self.resolve_client_object_id(client_addr).await;
+        if let Some(obj_id) = object_id {
+            let mut chars = self.characters.write().await;
+            if let Some(c) = chars.get_mut(&obj_id) {
+                c.skills = sl.skills.clone();
+                c.last_updated_epoch_ms = now;
+            }
+            let _ = self.event_tx.send(SnifferEvent::SkillsUpdated {
+                client_addr,
+                object_id: obj_id,
+                skills: sl.skills,
+            });
+        }
+    }
+
+    async fn handle_abnormal_status(&self, client_addr: Option<SocketAddr>, buffs: Vec<BuffEffect>, now: u64) {
+        let object_id = self.resolve_client_object_id(client_addr).await;
+        if let Some(obj_id) = object_id {
+            let mut chars = self.characters.write().await;
+            if let Some(c) = chars.get_mut(&obj_id) {
+                c.buffs = buffs.clone();
+                c.last_updated_epoch_ms = now;
+            }
+            let _ = self.event_tx.send(SnifferEvent::BuffsUpdated {
+                client_addr,
+                object_id: obj_id,
+                buffs,
+            });
+        }
+    }
+
+    async fn handle_private_store(&self, client_addr: Option<SocketAddr>, ps: PrivateStorePacket, now: u64) {
+        let seller_name = {
+            let chars = self.characters.read().await;
+            chars.get(&ps.seller_object_id).map(|c| c.name.clone())
+        };
+
+        let session = PrivateStoreSession {
+            seller_object_id: ps.seller_object_id,
+            seller_name,
+            store_type: ps.store_type,
+            store_title: ps.store_title,
+            items: ps.items,
+            last_seen_epoch_ms: now,
+        };
+
+        let mut m = self.market.write().await;
+        m.private_stores.insert(session.seller_object_id, session.clone());
+
+        let _ = self.event_tx.send(SnifferEvent::PrivateStoreUpdated {
+            client_addr,
+            store: session,
+        });
+    }
+
+    async fn handle_commission_list(&self, cl: CommissionListPacket, _now: u64) {
+        let mut m = self.market.write().await;
+        m.commission_items = cl.items.clone();
+        let _ = self.event_tx.send(SnifferEvent::CommissionMarketUpdated {
+            items: cl.items,
+        });
+    }
+
+    async fn handle_world_exchange_list(&self, we: WorldExchangeListPacket, _now: u64) {
+        let mut m = self.market.write().await;
+        m.world_exchange_items = we.items.clone();
+        let _ = self.event_tx.send(SnifferEvent::WorldExchangeUpdated {
+            items: we.items,
+        });
+    }
+
+    async fn handle_einhasad_store(&self, es: EinhasadStorePacket, _now: u64) {
+        let mut m = self.market.write().await;
+        m.einhasad_products = es.products.clone();
+        let _ = self.event_tx.send(SnifferEvent::EinhasadStoreUpdated {
+            products: es.products,
+        });
+    }
+
     async fn handle_movement(
         &self,
         client_addr: Option<SocketAddr>,
@@ -332,12 +573,23 @@ impl CharacterTracker {
             });
         }
     }
+
+    async fn resolve_client_object_id(&self, client_addr: Option<SocketAddr>) -> Option<u32> {
+        if let Some(addr) = client_addr {
+            let c_to_o = self.client_to_object.read().await;
+            if let Some(&id) = c_to_o.get(&addr) {
+                return Some(id);
+            }
+        }
+        let active = self.active_player_id.read().await;
+        *active
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use l2_sniffer_protocol::{AuthLoginPacket, CharSelectSlot, UserInfoPacket};
+    use l2_sniffer_protocol::{AuthLoginPacket, CharSelectSlot, ItemInfo, SkillEntry, UserInfoPacket};
 
     #[tokio::test]
     async fn test_multi_client_and_account_tracker() {
@@ -390,5 +642,36 @@ mod tests {
         let c = tracker.get_character_by_client(&client1).await.unwrap();
         assert_eq!(c.name, "HeroKnight");
         assert_eq!(c.account_name, Some("JasonAccount1".to_string()));
+
+        // 4. Skills update
+        let sl = SkillListPacket {
+            skills: vec![SkillEntry {
+                skill_id: 1069,
+                level: 15,
+                sub_level: 0,
+                is_passive: false,
+                is_disabled: false,
+                enchant_type: 0,
+            }],
+        };
+        tracker.handle_packet_with_client(Some(client1), L2Packet::SkillList(sl)).await;
+        let skills = tracker.get_character_skills(1001).await;
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].skill_id, 1069);
+
+        // 5. Inventory update
+        let il = ItemListPacket {
+            show_window: true,
+            items: vec![ItemInfo {
+                object_id: 2001,
+                item_id: 57,
+                count: 1000000,
+                ..Default::default()
+            }],
+        };
+        tracker.handle_packet_with_client(Some(client1), L2Packet::ItemList(il)).await;
+        let inv = tracker.get_character_inventory(1001).await;
+        assert_eq!(inv.len(), 1);
+        assert_eq!(inv[0].item_id, 57);
     }
 }

@@ -44,6 +44,41 @@ pub enum SnifferEvent {
         exp: u64,
         sp: u32,
     },
+    SkillsUpdated {
+        client_addr: Option<SocketAddr>,
+        object_id: u32,
+        skills: Vec<crate::model::SkillEntry>,
+    },
+    BuffsUpdated {
+        client_addr: Option<SocketAddr>,
+        object_id: u32,
+        buffs: Vec<crate::model::BuffEffect>,
+    },
+    InventoryLoaded {
+        client_addr: Option<SocketAddr>,
+        object_id: u32,
+        items: Vec<crate::model::InventoryItem>,
+    },
+    WarehouseLoaded {
+        client_addr: Option<SocketAddr>,
+        object_id: u32,
+        wh_type: crate::model::WarehouseType,
+        player_adena: u64,
+        items: Vec<crate::model::InventoryItem>,
+    },
+    PrivateStoreUpdated {
+        client_addr: Option<SocketAddr>,
+        store: crate::model::PrivateStoreSession,
+    },
+    CommissionMarketUpdated {
+        items: Vec<crate::model::CommissionItem>,
+    },
+    WorldExchangeUpdated {
+        items: Vec<crate::model::WorldExchangeItem>,
+    },
+    EinhasadStoreUpdated {
+        products: Vec<crate::model::EinhasadProduct>,
+    },
     ItemUpdated {
         client_addr: Option<SocketAddr>,
         object_id: u32,
