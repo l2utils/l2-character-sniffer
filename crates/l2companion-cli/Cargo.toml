@@ -15,6 +15,7 @@ l2companion-capture.workspace = true
 l2companion-protocol.workspace = true
 tokio.workspace = true
 clap.workspace = true
+inquire.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 anyhow.workspace = true
