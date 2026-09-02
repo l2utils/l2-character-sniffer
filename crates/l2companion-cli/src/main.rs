@@ -158,6 +158,8 @@ async fn run_capture_session(
     }
 
     let session = builder.build()?;
+    println!("📡 Capture Source: {}", session.source_description());
+
     let tracker = Arc::new(CharacterTracker::new());
     let mut event_rx = tracker.subscribe();
 
