@@ -359,7 +359,7 @@ impl CharacterTracker {
     }
 
     async fn handle_user_info(&self, client_addr: Option<SocketAddr>, info: UserInfoPacket, now: u64) {
-        if info.name.is_empty() {
+        if info.name.is_empty() || info.level == 0 || info.level > 130 || info.object_id == 0 {
             return;
         }
 
@@ -489,6 +489,12 @@ impl CharacterTracker {
         if let Some(obj_id) = object_id {
             let mut chars = self.characters.write().await;
             if let Some(c) = chars.get_mut(&obj_id) {
+                if il.items.is_empty() && !c.inventory.is_empty() {
+                    return; // Ignore transient empty item list when inventory is already loaded
+                }
+                if c.inventory == il.items {
+                    return; // Suppress identical duplicate load
+                }
                 c.inventory = il.items.clone();
                 c.last_updated_epoch_ms = now;
             }
@@ -501,6 +507,9 @@ impl CharacterTracker {
     }
 
     async fn handle_inventory_update(&self, client_addr: Option<SocketAddr>, iu: InventoryUpdatePacket, now: u64) {
+        if iu.items.is_empty() {
+            return;
+        }
         let object_id = self.resolve_client_object_id(client_addr).await;
         if let Some(obj_id) = object_id {
             let mut chars = self.characters.write().await;
@@ -539,10 +548,16 @@ impl CharacterTracker {
     }
 
     async fn handle_skill_list(&self, client_addr: Option<SocketAddr>, sl: SkillListPacket, now: u64) {
+        if sl.skills.is_empty() {
+            return;
+        }
         let object_id = self.resolve_client_object_id(client_addr).await;
         if let Some(obj_id) = object_id {
             let mut chars = self.characters.write().await;
             if let Some(c) = chars.get_mut(&obj_id) {
+                if c.skills == sl.skills {
+                    return; // Suppress duplicate skill list event
+                }
                 c.skills = sl.skills.clone();
                 c.last_updated_epoch_ms = now;
             }
@@ -559,6 +574,9 @@ impl CharacterTracker {
         if let Some(obj_id) = object_id {
             let mut chars = self.characters.write().await;
             if let Some(c) = chars.get_mut(&obj_id) {
+                if c.buffs == buffs {
+                    return; // Suppress duplicate buff event
+                }
                 c.buffs = buffs.clone();
                 c.last_updated_epoch_ms = now;
             }
