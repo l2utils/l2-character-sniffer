@@ -18,6 +18,10 @@ struct Cli {
     #[arg(long, global = true)]
     debug: bool,
 
+    /// Show virtual and WAN miniport network interfaces (hidden by default)
+    #[arg(long, global = true)]
+    show_virtual_nic: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -98,9 +102,12 @@ async fn main() -> Result<()> {
             println!("Enumerating network capture interfaces (detecting physical NICs & live traffic)...\n");
             let default_dev = l2companion_capture::default_device().ok().flatten();
             match list_devices() {
-                Ok(devices) => {
+                Ok(mut devices) => {
+                    if !cli.show_virtual_nic {
+                        devices.retain(|d| d.is_physical);
+                    }
                     if devices.is_empty() {
-                        println!("No network interfaces found. (Is Npcap installed and running?)");
+                        println!("No physical network interfaces found. (Use --show-virtual-nic to view virtual/WAN adapters)");
                     }
                     for (i, dev) in devices.into_iter().enumerate() {
                         let is_default = default_dev.as_ref().map(|d| d.name == dev.name).unwrap_or(false);
@@ -129,10 +136,10 @@ async fn main() -> Result<()> {
             filter,
             port,
         } => {
-            run_capture_session(device, pcap, filter, port, cli.debug).await?;
+            run_capture_session(device, pcap, filter, port, cli.debug, cli.show_virtual_nic).await?;
         }
         Commands::Analyze { path, port } => {
-            run_capture_session(None, Some(path), None, port, cli.debug).await?;
+            run_capture_session(None, Some(path), None, port, cli.debug, cli.show_virtual_nic).await?;
         }
         Commands::Serve {
             port,
@@ -141,7 +148,7 @@ async fn main() -> Result<()> {
             filter,
         } => {
             println!("Starting Lineage 2 Telemetry Daemon & Web Service on port {port}...");
-            run_capture_session(device, pcap, filter, Some(port), cli.debug).await?;
+            run_capture_session(device, pcap, filter, Some(port), cli.debug, cli.show_virtual_nic).await?;
         }
     }
 
@@ -160,8 +167,14 @@ impl std::fmt::Display for DeviceOption {
     }
 }
 
-fn prompt_for_device() -> Result<Option<String>> {
+fn prompt_for_device(show_virtual_nic: bool) -> Result<Option<String>> {
     let mut devices = list_devices()?;
+    if !show_virtual_nic {
+        let physical_only: Vec<_> = devices.iter().filter(|d| d.is_physical).cloned().collect();
+        if !physical_only.is_empty() {
+            devices = physical_only;
+        }
+    }
     if devices.is_empty() {
         return Ok(None);
     }
@@ -219,7 +232,7 @@ fn prompt_for_device() -> Result<Option<String>> {
     let ans = inquire::Select::new("Select network interface to sniff on (Use ↑↓ arrows or type to filter):", options)
         .with_starting_cursor(default_idx)
         .with_page_size(10)
-        .with_help_message("Press Enter to select, Esc/Ctrl+C to abort")
+        .with_help_message("Press Enter to select, Esc/Ctrl+C to abort (run with --show-virtual-nic to include virtual adapters)")
         .prompt();
 
     match ans {
@@ -241,6 +254,7 @@ async fn run_capture_session(
     filter: Option<String>,
     port: Option<u16>,
     debug: bool,
+    show_virtual_nic: bool,
 ) -> Result<()> {
     let mut builder = CaptureBuilder::new();
 
@@ -250,7 +264,7 @@ async fn run_capture_session(
         builder = builder.device(d);
     } else {
         // Prompt user to select an interface interactively
-        if let Some(selected) = prompt_for_device()? {
+        if let Some(selected) = prompt_for_device(show_virtual_nic)? {
             builder = builder.device(selected);
         }
     }
