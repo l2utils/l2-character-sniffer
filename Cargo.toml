@@ -26,7 +26,9 @@ futures-util = "0.3"
 pcap = "2.2"
 pcap-file = "2.0"
 axum = { version = "0.8", features = ["ws"] }
+tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = ["cors", "trace"] }
+http-body-util = "0.1"
 
 # Serialization & Data
 serde = { version = "1.0", features = ["derive"] }
