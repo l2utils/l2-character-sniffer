@@ -221,16 +221,23 @@ impl SnifferBuilder {
             });
         }
 
-        let device_name = match self.device_name {
-            Some(dev) => dev,
-            None => {
-                let dev = pcap::Device::lookup()?
-                    .ok_or_else(|| CaptureError::InterfaceNotFound("No default device found".into()))?;
-                dev.name
-            }
+        let selected_interface = match self.device_name {
+            Some(ref query) => crate::device::find_device(query)?
+                .ok_or_else(|| CaptureError::InterfaceNotFound(format!("Network interface '{query}' not found")))?
+            ,
+            None => crate::device::default_device()?
+                .ok_or_else(|| CaptureError::InterfaceNotFound("No active network device found".into()))?,
         };
 
-        let cap: Capture<pcap::Active> = Capture::from_device(device_name.as_str())?
+        let dev_desc = selected_interface.description.as_deref().unwrap_or("Network Adapter");
+        let dev_ips = if selected_interface.addresses.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", selected_interface.addresses.join(", "))
+        };
+        info!("Opening capture on device: {} [{}{}]", selected_interface.name, dev_desc, dev_ips);
+
+        let cap: Capture<pcap::Active> = Capture::from_device(selected_interface.name.as_str())?
             .promisc(self.promiscuous)
             .snaplen(self.snaplen)
             .timeout(self.timeout_ms)
@@ -239,6 +246,7 @@ impl SnifferBuilder {
 
         Ok(SnifferSession::Live {
             cap,
+            device_info: selected_interface,
             filter: self.bpf_filter,
             game_ports: self.game_ports,
         })
@@ -248,6 +256,7 @@ impl SnifferBuilder {
 pub enum SnifferSession {
     Live {
         cap: Capture<pcap::Active>,
+        device_info: crate::device::NetworkInterface,
         filter: String,
         game_ports: Vec<u16>,
     },
@@ -258,17 +267,37 @@ pub enum SnifferSession {
 }
 
 impl SnifferSession {
+    /// Returns a human-friendly description of the capture source (live NIC or pcap path).
+    pub fn source_description(&self) -> String {
+        match self {
+            SnifferSession::Live { device_info, .. } => {
+                let desc = device_info.description.as_deref().unwrap_or("Adapter");
+                let ips = if device_info.addresses.is_empty() {
+                    String::new()
+                } else {
+                    format!(" ({})", device_info.addresses.join(", "))
+                };
+                format!("Live Interface: {} [{}{}]", device_info.name, desc, ips)
+            }
+            SnifferSession::OfflineFile { path, .. } => {
+                format!("Offline Capture File: {}", path)
+            }
+        }
+    }
+
     /// Starts background capture thread streaming parsed packets with client session context.
     pub fn spawn_worker(mut self, tx: mpsc::Sender<SessionMessage>) -> tokio::task::JoinHandle<()> {
         tokio::task::spawn_blocking(move || {
             let mut streams: HashMap<SocketAddr, ClientStream> = HashMap::new();
 
             match &mut self {
-                SnifferSession::Live { cap, filter, game_ports } => {
+                SnifferSession::Live { cap, device_info, filter, game_ports } => {
                     if let Err(e) = cap.filter(filter, true) {
                         warn!("Failed to apply BPF filter '{filter}': {e}");
                     }
-                    info!("Sniffer live capture started on network interface");
+                    let desc = device_info.description.as_deref().unwrap_or("Adapter");
+                    let ips = device_info.addresses.join(", ");
+                    info!("Sniffer live capture started on {} [{}] (IPs: {})", device_info.name, desc, ips);
 
                     loop {
                         match cap.next_packet() {
