@@ -53,7 +53,7 @@ enum Commands {
     /// Run as a persistent background capture & REST/WebSocket API server daemon
     Serve {
         /// Port to run the telemetry API server on
-        #[arg(short, long, default_value_t = 3000)]
+        #[arg(long, default_value_t = 3000)]
         port: u16,
 
         /// Network interface name to capture on (default: auto-detect)
