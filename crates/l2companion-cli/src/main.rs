@@ -44,7 +44,7 @@ enum Commands {
         #[arg(short, long)]
         filter: Option<String>,
 
-        /// Port to start the REST and WebSocket telemetry API server on (e.g. 3000)
+        /// Port to start the GraphQL and WebSocket telemetry API server on (e.g. 3000)
         #[arg(long)]
         port: Option<u16>,
     },
@@ -54,11 +54,11 @@ enum Commands {
         #[arg(default_value = "captures/l2-multi-client.pcapng")]
         path: String,
 
-        /// Port to start the REST and WebSocket telemetry API server on (e.g. 3000)
+        /// Port to start the GraphQL and WebSocket telemetry API server on (e.g. 3000)
         #[arg(long)]
         port: Option<u16>,
     },
-    /// Run as a persistent background capture & REST/WebSocket API server daemon
+    /// Run as a persistent background capture & GraphQL/WebSocket API server daemon
     Serve {
         /// Port to run the telemetry API server on
         #[arg(long, default_value_t = 3000)]
@@ -288,7 +288,7 @@ async fn run_capture_session(
         }
         println!("🧭 GraphQL Endpoint:   http://{}/graphql", addr);
         println!("📡 Subscriptions:      ws://{}/graphql/ws", addr);
-        println!("🌐 REST Endpoints:      http://{}/api/...", addr);
+        println!("⚡ Raw Events WS:      ws://{}/ws", addr);
         Some(handle)
     } else {
         None
