@@ -14,8 +14,8 @@ use tracing::info;
 
 use crate::event::CompanionEvent;
 use crate::model::{
-    AccountSession, BuffEffect, Character, CommissionItem, EinhasadProduct, InventoryItem,
-    Location, MarketState, PrivateStoreSession, SkillEntry, WorldExchangeItem,
+    AccountSession, BuffEffect, CharSelectSlot, Character, CommissionItem, EinhasadProduct, InventoryItem,
+    Location, MarketState, PrivateStoreSession, SkillEntry, WarehouseType, WorldExchangeItem,
 };
 
 /// Shared thread-safe tracker state across all client sessions and accounts.
@@ -346,15 +346,16 @@ impl CharacterTracker {
             last_seen_epoch_ms: now,
         });
 
-        entry.character_roster = info.character_slots.clone();
+        let roster: Vec<CharSelectSlot> = info.character_slots.into_iter().map(Into::into).collect();
+        entry.character_roster = roster.clone();
         entry.last_seen_epoch_ms = now;
 
-        info!("Loaded roster for account '{}': {} characters", account_name, info.character_slots.len());
+        info!("Loaded roster for account '{}': {} characters", account_name, roster.len());
 
         let _ = self.event_tx.send(CompanionEvent::AccountRosterLoaded {
             client_addr,
             account_name,
-            characters: info.character_slots,
+            characters: roster,
         });
     }
 
@@ -485,23 +486,24 @@ impl CharacterTracker {
     }
 
     async fn handle_item_list(&self, client_addr: Option<SocketAddr>, il: ItemListPacket, now: u64) {
+        let domain_items: Vec<InventoryItem> = il.items.into_iter().map(Into::into).collect();
         let object_id = self.resolve_client_object_id(client_addr).await;
         if let Some(obj_id) = object_id {
             let mut chars = self.characters.write().await;
             if let Some(c) = chars.get_mut(&obj_id) {
-                if il.items.is_empty() && !c.inventory.is_empty() {
+                if domain_items.is_empty() && !c.inventory.is_empty() {
                     return; // Ignore transient empty item list when inventory is already loaded
                 }
-                if c.inventory == il.items {
+                if c.inventory == domain_items {
                     return; // Suppress identical duplicate load
                 }
-                c.inventory = il.items.clone();
+                c.inventory = domain_items.clone();
                 c.last_updated_epoch_ms = now;
             }
             let _ = self.event_tx.send(CompanionEvent::InventoryLoaded {
                 client_addr,
                 object_id: obj_id,
-                items: il.items,
+                items: domain_items,
             });
         }
     }
@@ -510,11 +512,12 @@ impl CharacterTracker {
         if iu.items.is_empty() {
             return;
         }
+        let domain_items: Vec<InventoryItem> = iu.items.into_iter().map(Into::into).collect();
         let object_id = self.resolve_client_object_id(client_addr).await;
         if let Some(obj_id) = object_id {
             let mut chars = self.characters.write().await;
             if let Some(c) = chars.get_mut(&obj_id) {
-                for updated in &iu.items {
+                for updated in &domain_items {
                     if let Some(pos) = c.inventory.iter().position(|i| i.object_id == updated.object_id) {
                         c.inventory[pos] = updated.clone();
                     } else {
@@ -526,24 +529,26 @@ impl CharacterTracker {
             let _ = self.event_tx.send(CompanionEvent::InventoryLoaded {
                 client_addr,
                 object_id: obj_id,
-                items: iu.items,
+                items: domain_items,
             });
         }
     }
 
     async fn handle_warehouse_list(&self, client_addr: Option<SocketAddr>, wh: WarehouseListPacket, now: u64) {
+        let domain_items: Vec<InventoryItem> = wh.items.into_iter().map(Into::into).collect();
+        let wh_type: WarehouseType = wh.wh_type.into();
         let object_id = self.resolve_client_object_id(client_addr).await.unwrap_or(0);
         let mut chars = self.characters.write().await;
         if let Some(c) = chars.get_mut(&object_id) {
-            c.warehouse = wh.items.clone();
+            c.warehouse = domain_items.clone();
             c.last_updated_epoch_ms = now;
         }
         let _ = self.event_tx.send(CompanionEvent::WarehouseLoaded {
             client_addr,
             object_id,
-            wh_type: wh.wh_type,
+            wh_type,
             player_adena: wh.player_adena,
-            items: wh.items,
+            items: domain_items,
         });
     }
 
@@ -551,39 +556,41 @@ impl CharacterTracker {
         if sl.skills.is_empty() {
             return;
         }
+        let domain_skills: Vec<SkillEntry> = sl.skills.into_iter().map(Into::into).collect();
         let object_id = self.resolve_client_object_id(client_addr).await;
         if let Some(obj_id) = object_id {
             let mut chars = self.characters.write().await;
             if let Some(c) = chars.get_mut(&obj_id) {
-                if c.skills == sl.skills {
+                if c.skills == domain_skills {
                     return; // Suppress duplicate skill list event
                 }
-                c.skills = sl.skills.clone();
+                c.skills = domain_skills.clone();
                 c.last_updated_epoch_ms = now;
             }
             let _ = self.event_tx.send(CompanionEvent::SkillsUpdated {
                 client_addr,
                 object_id: obj_id,
-                skills: sl.skills,
+                skills: domain_skills,
             });
         }
     }
 
-    async fn handle_abnormal_status(&self, client_addr: Option<SocketAddr>, buffs: Vec<BuffEffect>, now: u64) {
+    async fn handle_abnormal_status(&self, client_addr: Option<SocketAddr>, buffs: Vec<l2companion_protocol::BuffEffect>, now: u64) {
+        let domain_buffs: Vec<BuffEffect> = buffs.into_iter().map(Into::into).collect();
         let object_id = self.resolve_client_object_id(client_addr).await;
         if let Some(obj_id) = object_id {
             let mut chars = self.characters.write().await;
             if let Some(c) = chars.get_mut(&obj_id) {
-                if c.buffs == buffs {
+                if c.buffs == domain_buffs {
                     return; // Suppress duplicate buff event
                 }
-                c.buffs = buffs.clone();
+                c.buffs = domain_buffs.clone();
                 c.last_updated_epoch_ms = now;
             }
             let _ = self.event_tx.send(CompanionEvent::BuffsUpdated {
                 client_addr,
                 object_id: obj_id,
-                buffs,
+                buffs: domain_buffs,
             });
         }
     }
@@ -597,9 +604,9 @@ impl CharacterTracker {
         let session = PrivateStoreSession {
             seller_object_id: ps.seller_object_id,
             seller_name,
-            store_type: ps.store_type,
+            store_type: ps.store_type.into(),
             store_title: ps.store_title,
-            items: ps.items,
+            items: ps.items.into_iter().map(Into::into).collect(),
             last_seen_epoch_ms: now,
         };
 
@@ -613,26 +620,29 @@ impl CharacterTracker {
     }
 
     async fn handle_commission_list(&self, cl: CommissionListPacket, _now: u64) {
+        let items: Vec<CommissionItem> = cl.items.into_iter().map(Into::into).collect();
         let mut comm = self.commission_items.write().await;
-        *comm = cl.items.clone();
+        *comm = items.clone();
         let _ = self.event_tx.send(CompanionEvent::CommissionMarketUpdated {
-            items: cl.items,
+            items,
         });
     }
 
     async fn handle_world_exchange_list(&self, we: WorldExchangeListPacket, _now: u64) {
+        let items: Vec<WorldExchangeItem> = we.items.into_iter().map(Into::into).collect();
         let mut ex = self.world_exchange_items.write().await;
-        *ex = we.items.clone();
+        *ex = items.clone();
         let _ = self.event_tx.send(CompanionEvent::WorldExchangeUpdated {
-            items: we.items,
+            items,
         });
     }
 
     async fn handle_einhasad_store(&self, es: EinhasadStorePacket, _now: u64) {
+        let products: Vec<EinhasadProduct> = es.products.into_iter().map(Into::into).collect();
         let mut ein = self.einhasad_products.write().await;
-        *ein = es.products.clone();
+        *ein = products.clone();
         let _ = self.event_tx.send(CompanionEvent::EinhasadStoreUpdated {
-            products: es.products,
+            products,
         });
     }
 
