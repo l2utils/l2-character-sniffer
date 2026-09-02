@@ -79,10 +79,38 @@ impl CharacterTracker {
         chars.values().find(|c| c.name.eq_ignore_ascii_case(name)).cloned()
     }
 
-    /// Retrieve snapshot of all detected account sessions.
+    /// Retrieve snapshot of all detected account sessions with active characters resolved.
     pub async fn get_accounts(&self) -> Vec<AccountSession> {
+        let chars = self.characters.read().await;
         let accs = self.accounts.read().await;
-        accs.values().cloned().collect()
+
+        let mut result: Vec<AccountSession> = accs.values().cloned().collect();
+
+        for acc in result.iter_mut() {
+            if acc.active_character.is_none() {
+                // 1. Match active character by explicit account name
+                if let Some(c) = chars.values().find(|c| c.account_name.as_deref() == Some(&acc.account_name)) {
+                    acc.active_character = Some(c.name.clone());
+                }
+                // 2. Match active character by client IP endpoint
+                else if !acc.client_addr.is_empty() {
+                    if let Some(c) = chars.values().find(|c| c.client_addr.as_deref() == Some(&acc.client_addr)) {
+                        acc.active_character = Some(c.name.clone());
+                    }
+                }
+                // 3. Match active character if any name/ID from the account's roster is in active characters
+                if acc.active_character.is_none() {
+                    for slot in &acc.character_roster {
+                        if let Some(c) = chars.values().find(|c| c.name == slot.name || c.object_id == slot.char_id) {
+                            acc.active_character = Some(c.name.clone());
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        result
     }
 
     /// Retrieve character by client endpoint.
@@ -358,7 +386,7 @@ impl CharacterTracker {
 
         let char_entry = chars.entry(info.object_id).or_insert_with(Character::default);
         char_entry.object_id = info.object_id;
-        char_entry.account_name = account_name;
+        char_entry.account_name = account_name.clone();
         char_entry.name = info.name.clone();
         if info.class_id > 0 { char_entry.class_id = info.class_id; }
         if info.level > 0 { char_entry.level = info.level; }
@@ -378,6 +406,32 @@ impl CharacterTracker {
         char_entry.last_updated_epoch_ms = now;
 
         *active = Some(info.object_id);
+
+        // Update active_character in accounts
+        {
+            let mut accs = self.accounts.write().await;
+            if let Some(ref acc_name) = account_name {
+                let entry = accs.entry(acc_name.clone()).or_insert_with(|| AccountSession {
+                    account_name: acc_name.clone(),
+                    client_addr: client_addr.map(|a| a.to_string()).unwrap_or_default(),
+                    character_roster: Vec::new(),
+                    active_character: Some(info.name.clone()),
+                    last_seen_epoch_ms: now,
+                });
+                entry.active_character = Some(info.name.clone());
+                entry.last_seen_epoch_ms = now;
+            } else if let Some(addr) = client_addr {
+                for entry in accs.values_mut() {
+                    if entry.client_addr == addr.to_string()
+                        || entry.character_roster.iter().any(|c| c.name == info.name || c.char_id == info.object_id)
+                    {
+                        entry.active_character = Some(info.name.clone());
+                        entry.last_seen_epoch_ms = now;
+                    }
+                }
+            }
+        }
+
         info!("Updated player character: {} (ID: {}, Level: {}, HP: {}/{})",
             info.name, info.object_id, char_entry.level, char_entry.vitals.cur_hp, char_entry.vitals.max_hp);
 
