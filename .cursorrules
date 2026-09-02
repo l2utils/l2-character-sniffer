@@ -1,0 +1,19 @@
+# Cursor Rules
+
+Please refer to [AGENTS.md](AGENTS.md) for full monorepo architecture, crate layering, and development workflows.
+
+- **Workspace Crates**:
+  - `crates/l2-sniffer-protocol`: Pure Rust, zero I/O, cross-platform.
+  - `crates/l2-sniffer-capture`: Npcap / libpcap ingestion.
+  - `crates/l2-sniffer-core`: Domain state machine, GraphQL, Axum REST/WebSocket.
+  - `crates/l2-sniffer-cli`: CLI binary.
+- **Key Commands**:
+  - `cargo check --workspace --all-targets`
+  - `cargo test --workspace`
+  - `cargo clippy --workspace --all-targets -- -D warnings`
+  - `cargo fmt --check`
+- **Conventions**:
+  - Use `thiserror` for library crates, `anyhow` for CLI.
+  - Packet parsers must never panic; fallback to `L2Packet::Raw`.
+  - Never modify vendored `lib/` import stubs.
+  - PRs created via `gh` must use `--body-file` with `## Summary`, `## Changes`, `## Verification`.
