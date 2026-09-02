@@ -3,6 +3,7 @@
 use byteorder::{LittleEndian, ReadBytesExt};
 use serde::{Deserialize, Serialize};
 use std::io::Cursor;
+use async_graphql::{Enum, SimpleObject};
 
 /// Parsed Lineage 2 packet enum.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,14 +32,14 @@ pub enum L2Packet {
     },
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, SimpleObject)]
 pub struct AuthLoginPacket {
     pub account_name: String,
     pub session_key1: u32,
     pub session_key2: u32,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, SimpleObject)]
 pub struct CharSelectSlot {
     pub name: String,
     pub title: String,
@@ -110,7 +111,7 @@ pub struct StatusUpdatePacket {
     pub attributes: Vec<StatusUpdateAttribute>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, SimpleObject)]
 pub struct ItemInfo {
     pub object_id: u32,
     pub item_id: u32,
@@ -136,7 +137,7 @@ pub struct InventoryUpdatePacket {
     pub items: Vec<ItemInfo>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Enum)]
 pub enum WarehouseType {
     Private,
     Clan,
@@ -158,7 +159,7 @@ pub struct WarehouseListPacket {
     pub items: Vec<ItemInfo>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, SimpleObject)]
 pub struct SkillEntry {
     pub skill_id: u32,
     pub level: u32,
@@ -173,7 +174,7 @@ pub struct SkillListPacket {
     pub skills: Vec<SkillEntry>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, SimpleObject)]
 pub struct BuffEffect {
     pub skill_id: u32,
     pub level: u32,
@@ -193,7 +194,7 @@ pub struct MagicEffectIconsPacket {
     pub buffs: Vec<BuffEffect>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, SimpleObject)]
 pub struct PrivateStoreItem {
     pub item_object_id: u32,
     pub item_id: u32,
@@ -202,7 +203,7 @@ pub struct PrivateStoreItem {
     pub enchant_level: u16,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Enum)]
 pub enum PrivateStoreType {
     Sell,
     Buy,
@@ -224,7 +225,7 @@ pub struct PrivateStorePacket {
     pub items: Vec<PrivateStoreItem>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, SimpleObject)]
 pub struct CommissionItem {
     pub commission_id: u64,
     pub item_object_id: u32,
@@ -243,7 +244,7 @@ pub struct CommissionListPacket {
     pub items: Vec<CommissionItem>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, SimpleObject)]
 pub struct WorldExchangeItem {
     pub listing_id: u64,
     pub item_id: u32,
@@ -260,7 +261,7 @@ pub struct WorldExchangeListPacket {
     pub items: Vec<WorldExchangeItem>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, SimpleObject)]
 pub struct EinhasadProduct {
     pub product_id: u32,
     pub item_id: u32,

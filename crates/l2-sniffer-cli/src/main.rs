@@ -234,7 +234,10 @@ async fn run_capture_session(
     // Start API server if port is provided
     let _api_handle = if let Some(p) = port {
         let (addr, handle) = start_api_server(tracker.clone(), p).await?;
-        println!("🚀 REST API and WebSocket live at http://{}", addr);
+        println!("🚀 GraphiQL Playground: http://{}", addr);
+        println!("🧭 GraphQL Endpoint:   http://{}/graphql", addr);
+        println!("📡 Subscriptions:      ws://{}/graphql/ws", addr);
+        println!("🌐 REST Endpoints:      http://{}/api/...", addr);
         Some(handle)
     } else {
         None

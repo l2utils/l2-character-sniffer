@@ -25,7 +25,10 @@ pub struct CharacterTracker {
     client_to_object: Arc<RwLock<HashMap<SocketAddr, u32>>>,
     client_to_account: Arc<RwLock<HashMap<SocketAddr, String>>>,
     accounts: Arc<RwLock<HashMap<String, AccountSession>>>,
-    market: Arc<RwLock<MarketState>>,
+    private_stores: Arc<RwLock<HashMap<u32, PrivateStoreSession>>>,
+    commission_items: Arc<RwLock<Vec<CommissionItem>>>,
+    world_exchange_items: Arc<RwLock<Vec<WorldExchangeItem>>>,
+    einhasad_products: Arc<RwLock<Vec<EinhasadProduct>>>,
     active_player_id: Arc<RwLock<Option<u32>>>,
     event_tx: broadcast::Sender<SnifferEvent>,
 }
@@ -44,7 +47,10 @@ impl CharacterTracker {
             client_to_object: Arc::new(RwLock::new(HashMap::new())),
             client_to_account: Arc::new(RwLock::new(HashMap::new())),
             accounts: Arc::new(RwLock::new(HashMap::new())),
-            market: Arc::new(RwLock::new(MarketState::default())),
+            private_stores: Arc::new(RwLock::new(HashMap::new())),
+            commission_items: Arc::new(RwLock::new(Vec::new())),
+            world_exchange_items: Arc::new(RwLock::new(Vec::new())),
+            einhasad_products: Arc::new(RwLock::new(Vec::new())),
             active_player_id: Arc::new(RwLock::new(None)),
             event_tx,
         }
@@ -116,32 +122,41 @@ impl CharacterTracker {
 
     /// Retrieve market state snapshot.
     pub async fn get_market_state(&self) -> MarketState {
-        let m = self.market.read().await;
-        m.clone()
+        let stores = self.private_stores.read().await;
+        let comm = self.commission_items.read().await;
+        let we = self.world_exchange_items.read().await;
+        let ein = self.einhasad_products.read().await;
+
+        MarketState {
+            private_stores: stores.values().cloned().collect(),
+            commission_items: comm.clone(),
+            world_exchange_items: we.clone(),
+            einhasad_products: ein.clone(),
+        }
     }
 
     /// Retrieve active private stores.
     pub async fn get_private_stores(&self) -> Vec<PrivateStoreSession> {
-        let m = self.market.read().await;
-        m.private_stores.values().cloned().collect()
+        let stores = self.private_stores.read().await;
+        stores.values().cloned().collect()
     }
 
     /// Retrieve commission market listings.
     pub async fn get_commission_items(&self) -> Vec<CommissionItem> {
-        let m = self.market.read().await;
-        m.commission_items.clone()
+        let comm = self.commission_items.read().await;
+        comm.clone()
     }
 
     /// Retrieve world exchange listings.
     pub async fn get_world_exchange_items(&self) -> Vec<WorldExchangeItem> {
-        let m = self.market.read().await;
-        m.world_exchange_items.clone()
+        let we = self.world_exchange_items.read().await;
+        we.clone()
     }
 
     /// Retrieve Einhasad store products.
     pub async fn get_einhasad_products(&self) -> Vec<EinhasadProduct> {
-        let m = self.market.read().await;
-        m.einhasad_products.clone()
+        let ein = self.einhasad_products.read().await;
+        ein.clone()
     }
 
     /// Registers a new game client connection and emits an event.
@@ -516,8 +531,8 @@ impl CharacterTracker {
             last_seen_epoch_ms: now,
         };
 
-        let mut m = self.market.write().await;
-        m.private_stores.insert(session.seller_object_id, session.clone());
+        let mut stores = self.private_stores.write().await;
+        stores.insert(session.seller_object_id, session.clone());
 
         let _ = self.event_tx.send(SnifferEvent::PrivateStoreUpdated {
             client_addr,
@@ -526,24 +541,24 @@ impl CharacterTracker {
     }
 
     async fn handle_commission_list(&self, cl: CommissionListPacket, _now: u64) {
-        let mut m = self.market.write().await;
-        m.commission_items = cl.items.clone();
+        let mut comm = self.commission_items.write().await;
+        *comm = cl.items.clone();
         let _ = self.event_tx.send(SnifferEvent::CommissionMarketUpdated {
             items: cl.items,
         });
     }
 
     async fn handle_world_exchange_list(&self, we: WorldExchangeListPacket, _now: u64) {
-        let mut m = self.market.write().await;
-        m.world_exchange_items = we.items.clone();
+        let mut ex = self.world_exchange_items.write().await;
+        *ex = we.items.clone();
         let _ = self.event_tx.send(SnifferEvent::WorldExchangeUpdated {
             items: we.items,
         });
     }
 
     async fn handle_einhasad_store(&self, es: EinhasadStorePacket, _now: u64) {
-        let mut m = self.market.write().await;
-        m.einhasad_products = es.products.clone();
+        let mut ein = self.einhasad_products.write().await;
+        *ein = es.products.clone();
         let _ = self.event_tx.send(SnifferEvent::EinhasadStoreUpdated {
             products: es.products,
         });
