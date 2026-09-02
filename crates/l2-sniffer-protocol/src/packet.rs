@@ -4,8 +4,6 @@ use byteorder::{LittleEndian, ReadBytesExt};
 use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 
-use crate::opcode::ClientOpcode;
-
 /// Parsed Lineage 2 packet enum.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
@@ -298,15 +296,15 @@ impl L2Packet {
     pub fn parse(opcode: u8, payload: &[u8]) -> Self {
         let mut cursor = Cursor::new(payload);
         match opcode {
-            // Modern Retail CharSelected / User Entrance (Opcode 0x0B)
-            0x0b => Self::parse_char_selected_retail(&mut cursor)
+            // UserInfo / CharSelected (Opcode 0x04 / 0x0B / 0x15 / 0x32)
+            0x04 | 0x0b | 0x15 | 0x32 => Self::parse_char_selected_retail(&mut cursor)
                 .map(L2Packet::UserInfo)
                 .unwrap_or(L2Packet::Raw {
                     opcode,
                     payload: payload.to_vec(),
                 }),
-            // Modern Retail CharSelectInfo / Roster (Opcode 0x09)
-            0x09 => Self::parse_char_select_info_retail(&mut cursor, payload)
+            // CharSelectInfo / Roster (Opcode 0x09 / 0x1F / 0x13 / 0x71)
+            0x09 | 0x1f | 0x13 | 0x71 => Self::parse_char_select_info_retail(&mut cursor, payload)
                 .map(L2Packet::CharSelectInfo)
                 .unwrap_or(L2Packet::Raw {
                     opcode,
@@ -509,29 +507,33 @@ impl L2Packet {
     /// Parses client-to-server packets (e.g. AuthLogin).
     pub fn parse_client(opcode: u8, payload: &[u8]) -> Self {
         let mut cursor = Cursor::new(payload);
-        match ClientOpcode::from(opcode) {
-            ClientOpcode::AuthLogin => Self::parse_auth_login(&mut cursor)
-                .map(L2Packet::AuthLogin)
-                .unwrap_or(L2Packet::Raw {
-                    opcode,
-                    payload: payload.to_vec(),
-                }),
-            _ => {
-                // Check for Client Extended Opcode 0xD0
-                if opcode == 0xd0 && payload.len() >= 2 {
-                    let sub_op = u16::from_le_bytes([payload[0], payload[1]]);
-                    let mut sub_cursor = Cursor::new(&payload[2..]);
-                    if sub_op == 0x0240 || sub_op == 0x0008 || sub_op == 0x002b {
-                        if let Ok(auth) = Self::parse_auth_login(&mut sub_cursor) {
-                            return L2Packet::AuthLogin(auth);
-                        }
-                    }
-                }
-                L2Packet::Raw {
-                    opcode,
-                    payload: payload.to_vec(),
+        match opcode {
+            0x08 | 0x2b | 0x00 => {
+                if let Ok(auth) = Self::parse_auth_login(&mut cursor) {
+                    return L2Packet::AuthLogin(auth);
                 }
             }
+            0xd0 => {
+                // Client Extended Opcode 0xD0
+                if payload.len() >= 2 {
+                    let mut sub_cursor = Cursor::new(&payload[2..]);
+                    if let Ok(auth) = Self::parse_auth_login(&mut sub_cursor) {
+                        return L2Packet::AuthLogin(auth);
+                    }
+                }
+            }
+            _ => {
+                // Fallback attempt for any client packet that might contain auth credentials
+                if payload.len() >= 8 {
+                    if let Ok(auth) = Self::parse_auth_login(&mut cursor) {
+                        return L2Packet::AuthLogin(auth);
+                    }
+                }
+            }
+        }
+        L2Packet::Raw {
+            opcode,
+            payload: payload.to_vec(),
         }
     }
 
@@ -578,28 +580,52 @@ impl L2Packet {
     }
 
     fn parse_auth_login(r: &mut Cursor<&[u8]>) -> Result<AuthLoginPacket, std::io::Error> {
-        let session_key1 = r.read_u32::<LittleEndian>().unwrap_or_default();
-        let _token_len = r.read_u16::<LittleEndian>().unwrap_or_default();
-        let raw_name = if let Ok(s) = read_ascii_string(r) {
+        let raw_buf = *r.get_ref();
+        let start_pos = r.position() as usize;
+        let slice = if start_pos < raw_buf.len() { &raw_buf[start_pos..] } else { raw_buf };
+
+        // 1. Try reading standard L2 format (Account name string first: UTF-16 / ASCII)
+        let mut test_r = Cursor::new(slice);
+        if let Ok(name) = read_l2_string(&mut test_r).or_else(|_| read_ascii_string(&mut test_r)) {
+            if name.len() >= 2 && name.len() <= 32 && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+                let session_key1 = test_r.read_u32::<LittleEndian>().unwrap_or_default();
+                let session_key2 = test_r.read_u32::<LittleEndian>().unwrap_or_default();
+                return Ok(AuthLoginPacket {
+                    account_name: name,
+                    session_key1,
+                    session_key2,
+                });
+            }
+        }
+
+        // 2. Try reading retail format (session_key1: u32, token_len: u16, raw_name, session_key2: u32)
+        let mut retail_r = Cursor::new(slice);
+        let session_key1 = retail_r.read_u32::<LittleEndian>().unwrap_or_default();
+        let _token_len = retail_r.read_u16::<LittleEndian>().unwrap_or_default();
+        let raw_name = if let Ok(s) = read_ascii_string(&mut retail_r) {
             s
         } else {
-            read_l2_string(r).unwrap_or_default()
+            read_l2_string(&mut retail_r).unwrap_or_default()
         };
-        let session_key2 = r.read_u32::<LittleEndian>().unwrap_or_default();
+        let session_key2 = retail_r.read_u32::<LittleEndian>().unwrap_or_default();
 
-        let account_name = if session_key1 > 0 && (raw_name.is_empty() || raw_name.len() > 25) {
-            format!("#{}", session_key1)
-        } else if !raw_name.is_empty() {
-            raw_name
-        } else {
-            format!("#{}", session_key1)
-        };
+        if !raw_name.is_empty() && raw_name.len() <= 32 && raw_name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+            return Ok(AuthLoginPacket {
+                account_name: raw_name,
+                session_key1,
+                session_key2,
+            });
+        }
 
-        Ok(AuthLoginPacket {
-            account_name,
-            session_key1,
-            session_key2,
-        })
+        if session_key1 > 0 {
+            return Ok(AuthLoginPacket {
+                account_name: format!("#{session_key1}"),
+                session_key1,
+                session_key2,
+            });
+        }
+
+        Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid auth login payload"))
     }
 
     fn parse_status_update(r: &mut Cursor<&[u8]>) -> Result<StatusUpdatePacket, std::io::Error> {
@@ -1105,6 +1131,47 @@ mod tests {
                 assert_eq!(wh.items[0].count, 50000);
             }
             _ => panic!("Expected WarehouseList packet"),
+        }
+    }
+
+    #[test]
+    fn test_parse_auth_login_standard() {
+        let mut data = Vec::new();
+        // UTF-16LE "my_account\0"
+        for ch in "my_account".encode_utf16() {
+            data.extend_from_slice(&ch.to_le_bytes());
+        }
+        data.extend_from_slice(&(0u16).to_le_bytes());
+        data.extend_from_slice(&(12345u32).to_le_bytes());
+        data.extend_from_slice(&(67890u32).to_le_bytes());
+
+        let packet = L2Packet::parse_client(0x2b, &data);
+        match packet {
+            L2Packet::AuthLogin(auth) => {
+                assert_eq!(auth.account_name, "my_account");
+                assert_eq!(auth.session_key1, 12345);
+                assert_eq!(auth.session_key2, 67890);
+            }
+            _ => panic!("Expected AuthLogin packet"),
+        }
+    }
+
+    #[test]
+    fn test_parse_auth_login_retail() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&(99999u32).to_le_bytes());
+        data.extend_from_slice(&(10u16).to_le_bytes());
+        data.extend_from_slice(b"retail_acc\0");
+        data.extend_from_slice(&(88888u32).to_le_bytes());
+
+        let packet = L2Packet::parse_client(0x08, &data);
+        match packet {
+            L2Packet::AuthLogin(auth) => {
+                assert_eq!(auth.account_name, "retail_acc");
+                assert_eq!(auth.session_key1, 99999);
+                assert_eq!(auth.session_key2, 88888);
+            }
+            _ => panic!("Expected AuthLogin packet"),
         }
     }
 }
