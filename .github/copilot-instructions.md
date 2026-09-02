@@ -18,3 +18,6 @@ This repository is a modular Rust monorepo for sniffing Lineage 2 network traffi
   - When decoding binary packet buffers, use `Cursor` and `byteorder` with bounds checking. Never panic on malformed or truncated packet streams.
 - **Platform Invariant**:
   - Do not delete or rename the vendored `lib/` directory (`Packet.lib`, `wpcap.lib`).
+- **Instruction Sync**:
+  - Keep all agent config files (`AGENTS.md`, `.github/copilot-instructions.md`, `CLAUDE.md`, `GEMINI.md`, `.cursorrules`) synchronized when updating instructions.
+

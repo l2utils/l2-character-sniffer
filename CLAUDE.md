@@ -17,3 +17,5 @@ Please refer to [AGENTS.md](AGENTS.md) for full monorepo architecture, crate lay
 - **Error Handling**: Use `thiserror` for library crates and `anyhow` for the CLI.
 - **Packet Parsers**: Never panic on malformed data; handle errors gracefully or fall back to `L2Packet::Raw`.
 - **PRs**: Always use `gh pr create/edit --body-file <path>` with structured `## Summary`, `## Changes`, and `## Verification` sections.
+- **Instruction Sync**: Always keep all agent config files (`AGENTS.md`, `.github/copilot-instructions.md`, `CLAUDE.md`, `GEMINI.md`, `.cursorrules`) synchronized when updating instructions.
+

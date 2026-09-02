@@ -114,6 +114,8 @@ cargo clippy --workspace --all-targets -- -D warnings
 1. **Verify Before Finishing**: Always ensure `cargo test --workspace` and `cargo fmt --check` pass after making code changes.
 2. **Preserve Architectural Purity**: Keep `l2-sniffer-protocol` strictly zero-IO and platform-agnostic.
 3. **Documentation**: Update docstrings and keep `README.md` in sync when introducing new CLI flags, GraphQL queries, or packet decoders.
+4. **Synchronize Agent Configurations**: When updating instructions, workflows, or rules, always update all agent entry points in sync (`AGENTS.md`, `.github/copilot-instructions.md`, `CLAUDE.md`, `GEMINI.md`, and `.cursorrules`).
+
 
 ---
 

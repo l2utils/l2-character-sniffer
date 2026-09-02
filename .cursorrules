@@ -17,3 +17,5 @@ Please refer to [AGENTS.md](AGENTS.md) for full monorepo architecture, crate lay
   - Packet parsers must never panic; fallback to `L2Packet::Raw`.
   - Never modify vendored `lib/` import stubs.
   - PRs created via `gh` must use `--body-file` with `## Summary`, `## Changes`, `## Verification`.
+  - Always keep all agent instruction files (`AGENTS.md`, `.github/copilot-instructions.md`, `CLAUDE.md`, `GEMINI.md`, `.cursorrules`) synchronized when updating guidelines.
+
