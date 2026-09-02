@@ -4,14 +4,15 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use l2companion_capture::{list_devices, SessionMessage, CaptureBuilder};
-use l2companion_service::{CharacterTracker, CompanionEvent};
+use l2companion_service::{start_api_server, CharacterTracker, CompanionEvent};
 use tokio::sync::mpsc;
 
 #[derive(Parser, Debug)]
-#[command(name = "l2companion", version, about = "Lineage 2 Character Data Telemetry CLI")]
+#[command(name = "l2companion", version, about = "Lineage 2 Character Data Telemetry & Telemetry Server CLI")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -34,12 +35,38 @@ enum Commands {
         /// Custom BPF filter (default: "tcp port 7777 or tcp port 2106")
         #[arg(short, long)]
         filter: Option<String>,
+
+        /// Port to start the REST and WebSocket telemetry API server on (e.g. 3000)
+        #[arg(long)]
+        port: Option<u16>,
     },
     /// Replay and analyze an offline pcap/pcapng capture file
     Analyze {
         /// Path to the .pcap or .pcapng file
         #[arg(default_value = "captures/l2-multi-client.pcapng")]
         path: String,
+
+        /// Port to start the REST and WebSocket telemetry API server on (e.g. 3000)
+        #[arg(long)]
+        port: Option<u16>,
+    },
+    /// Run as a persistent background capture & REST/WebSocket API server daemon
+    Serve {
+        /// Port to run the telemetry API server on
+        #[arg(short, long, default_value_t = 3000)]
+        port: u16,
+
+        /// Network interface name to capture on (default: auto-detect)
+        #[arg(short, long)]
+        device: Option<String>,
+
+        /// Read from offline pcap/pcapng file
+        #[arg(short, long)]
+        pcap: Option<String>,
+
+        /// Custom BPF filter
+        #[arg(short, long)]
+        filter: Option<String>,
     },
 }
 
@@ -90,11 +117,21 @@ async fn main() -> Result<()> {
             device,
             pcap,
             filter,
+            port,
         } => {
-            run_capture_session(device, pcap, filter).await?;
+            run_capture_session(device, pcap, filter, port).await?;
         }
-        Commands::Analyze { path } => {
-            run_capture_session(None, Some(path), None).await?;
+        Commands::Analyze { path, port } => {
+            run_capture_session(None, Some(path), None, port).await?;
+        }
+        Commands::Serve {
+            port,
+            device,
+            pcap,
+            filter,
+        } => {
+            println!("Starting Lineage 2 Telemetry Daemon & Web Service on port {port}...");
+            run_capture_session(device, pcap, filter, Some(port)).await?;
         }
     }
 
@@ -105,6 +142,7 @@ async fn run_capture_session(
     device: Option<String>,
     pcap: Option<String>,
     filter: Option<String>,
+    port: Option<u16>,
 ) -> Result<()> {
     println!("Initializing Lineage 2 Telemetry...");
     let mut builder = CaptureBuilder::new();
@@ -120,8 +158,17 @@ async fn run_capture_session(
     }
 
     let session = builder.build()?;
-    let tracker = CharacterTracker::new();
+    let tracker = Arc::new(CharacterTracker::new());
     let mut event_rx = tracker.subscribe();
+
+    // Start API server if port is provided
+    let _api_handle = if let Some(p) = port {
+        let (addr, handle) = start_api_server(tracker.clone(), p).await?;
+        println!("🚀 REST API and WebSocket live at http://{}", addr);
+        Some(handle)
+    } else {
+        None
+    };
 
     let (tx, mut rx) = mpsc::channel::<SessionMessage>(4096);
     let worker_handle = session.spawn_worker(tx);
@@ -198,6 +245,44 @@ async fn run_capture_session(
                     println!("❤️ [VITALS]    Client: {:<21} | Obj {}: HP: {}/{} | MP: {}/{}",
                         client_str, object_id, vitals.cur_hp, vitals.max_hp, vitals.cur_mp, vitals.max_mp);
                 }
+                CompanionEvent::SkillsUpdated { client_addr, object_id, skills } => {
+                    let client_str = client_addr.map(|a| a.to_string()).unwrap_or_else(|| "-".into());
+                    let passives = skills.iter().filter(|s| s.is_passive).count();
+                    let actives = skills.len() - passives;
+                    println!("🔮 [SKILLS]    Client: {:<21} | Obj {}: Loaded {} skills ({} active, {} passive)",
+                        client_str, object_id, skills.len(), actives, passives);
+                }
+                CompanionEvent::BuffsUpdated { client_addr, object_id, buffs } => {
+                    let client_str = client_addr.map(|a| a.to_string()).unwrap_or_else(|| "-".into());
+                    println!("🌟 [BUFFS]     Client: {:<21} | Obj {}: {} active buff effects",
+                        client_str, object_id, buffs.len());
+                }
+                CompanionEvent::InventoryLoaded { client_addr, object_id, items } => {
+                    let client_str = client_addr.map(|a| a.to_string()).unwrap_or_else(|| "-".into());
+                    let equipped = items.iter().filter(|i| i.equipped).count();
+                    println!("🎒 [INVENTORY] Client: {:<21} | Obj {}: {} items ({} equipped)",
+                        client_str, object_id, items.len(), equipped);
+                }
+                CompanionEvent::WarehouseLoaded { client_addr, object_id, wh_type, player_adena, items } => {
+                    let client_str = client_addr.map(|a| a.to_string()).unwrap_or_else(|| "-".into());
+                    println!("🏛️ [WAREHOUSE] Client: {:<21} | Obj {}: {:?} warehouse ({} items, {} adena)",
+                        client_str, object_id, wh_type, items.len(), format_number(player_adena));
+                }
+                CompanionEvent::PrivateStoreUpdated { client_addr, store } => {
+                    let client_str = client_addr.map(|a| a.to_string()).unwrap_or_else(|| "-".into());
+                    let seller = store.seller_name.unwrap_or_else(|| format!("Obj {}", store.seller_object_id));
+                    println!("🏪 [STORE]     Client: {:<21} | {:?} Store by \"{}\" ('{}') - {} items listed",
+                        client_str, store.store_type, seller, store.store_title, store.items.len());
+                }
+                CompanionEvent::CommissionMarketUpdated { items } => {
+                    println!("🏛️ [AUCTION]   Auction House Commission updated: {} items listed", items.len());
+                }
+                CompanionEvent::WorldExchangeUpdated { items } => {
+                    println!("🌐 [EXCHANGE]  World Exchange Market updated: {} items listed", items.len());
+                }
+                CompanionEvent::EinhasadStoreUpdated { products } => {
+                    println!("🪙 [EINHASAD]  Einhasad Gold Coin Store updated: {} offerings available", products.len());
+                }
                 _ => {}
             }
         }
@@ -209,6 +294,7 @@ async fn run_capture_session(
 
     let tracked = tracker.get_characters().await;
     let accounts = tracker.get_accounts().await;
+    let market = tracker.get_market_state().await;
 
     println!("\n================== Capture Summary ==================");
     println!("Total Packets Decoded: {}", total_pkts);
@@ -222,6 +308,22 @@ async fn run_capture_session(
     }
     if !tracked.is_empty() {
         println!("Tracked Characters:    {}", tracked.len());
+        for c in &tracked {
+            println!(" - Character \"{}\" (Lvl {}, Class {}) | Skills: {} | Buffs: {} | Inventory: {} items | Warehouse: {} items",
+                c.name, c.level, c.class_id, c.skills.len(), c.buffs.len(), c.inventory.len(), c.warehouse.len());
+        }
+    }
+    if !market.private_stores.is_empty() || !market.commission_items.is_empty() || !market.world_exchange_items.is_empty() {
+        println!("\nMarket Activity Summary:");
+        if !market.private_stores.is_empty() {
+            println!(" - Active Private Stores: {}", market.private_stores.len());
+        }
+        if !market.commission_items.is_empty() {
+            println!(" - Commission Auctions:   {}", market.commission_items.len());
+        }
+        if !market.world_exchange_items.is_empty() {
+            println!(" - World Exchange Items:  {}", market.world_exchange_items.len());
+        }
     }
     println!("\nActive Client Sessions:");
     let mut sorted_clients: Vec<_> = client_stats.into_iter().collect();
