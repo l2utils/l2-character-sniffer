@@ -3,7 +3,6 @@
 //! Command line tool to inspect network interfaces, capture packets, and monitor multi-client character statistics live.
 
 use std::collections::HashMap;
-use std::io::Write;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use anyhow::Result;
@@ -139,42 +138,66 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+#[derive(Clone)]
+struct DeviceOption {
+    name: String,
+    label: String,
+}
+
+impl std::fmt::Display for DeviceOption {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.label)
+    }
+}
+
 fn prompt_for_device() -> Result<Option<String>> {
     let devices = list_devices()?;
     if devices.is_empty() {
         return Ok(None);
     }
 
-    println!("\nAvailable network capture interfaces:");
     let default_dev = l2_sniffer_capture::default_device().ok().flatten();
-    let mut default_idx = 1;
+    let mut default_idx = 0;
 
-    for (i, dev) in devices.iter().enumerate() {
-        let is_default = default_dev.as_ref().map(|d| d.name == dev.name).unwrap_or(false);
-        if is_default {
-            default_idx = i + 1;
+    let options: Vec<DeviceOption> = devices
+        .iter()
+        .enumerate()
+        .map(|(i, dev)| {
+            let is_default = default_dev.as_ref().map(|d| d.name == dev.name).unwrap_or(false);
+            if is_default {
+                default_idx = i;
+            }
+            let desc = dev.description.as_deref().unwrap_or("Network Adapter");
+            let ips = if dev.addresses.is_empty() {
+                "No IP".to_string()
+            } else {
+                dev.addresses.join(", ")
+            };
+            let tag = if is_default { " ⭐ [ACTIVE]" } else { "" };
+            let label = format!("{:<40} | {:<25}{}", desc, ips, tag);
+            DeviceOption {
+                name: dev.name.clone(),
+                label,
+            }
+        })
+        .collect();
+
+    let ans = inquire::Select::new("Select network interface to sniff on (Use ↑↓ arrows or type to filter):", options)
+        .with_starting_cursor(default_idx)
+        .with_page_size(10)
+        .with_help_message("Press Enter to select, Esc/Ctrl+C to abort")
+        .prompt();
+
+    match ans {
+        Ok(choice) => Ok(Some(choice.name)),
+        Err(inquire::InquireError::OperationCanceled | inquire::InquireError::OperationInterrupted) => {
+            println!("Interface selection canceled.");
+            std::process::exit(0);
         }
-        let desc = dev.description.as_deref().unwrap_or("Network Adapter");
-        let ips = if dev.addresses.is_empty() {
-            "-".to_string()
-        } else {
-            dev.addresses.join(", ")
-        };
-        let marker = if is_default { " -> [RECOMMENDED]" } else { "" };
-        println!("  [{}] {}{} \n      IPs: {}", i + 1, desc, marker, ips);
-    }
-
-    print!("\nSelect interface to listen to [1-{}] (Press Enter for [{}]): ", devices.len(), default_idx);
-    std::io::stdout().flush()?;
-
-    let mut input = String::new();
-    std::io::stdin().read_line(&mut input)?;
-    let trimmed = input.trim();
-
-    if trimmed.is_empty() {
-        Ok(Some(default_idx.to_string()))
-    } else {
-        Ok(Some(trimmed.to_string()))
+        Err(e) => {
+            eprintln!("Interactive selector error: {e}");
+            Ok(default_dev.map(|d| d.name))
+        }
     }
 }
 
