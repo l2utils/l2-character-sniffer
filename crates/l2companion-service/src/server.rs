@@ -11,7 +11,7 @@ use axum::{
     },
     http::StatusCode,
     response::{Html, IntoResponse, Response},
-    routing::get,
+    routing::{get, post},
     Json, Router,
 };
 use futures_util::{SinkExt, StreamExt};
@@ -32,8 +32,8 @@ pub struct AppState {
     pub schema: AppSchema,
 }
 
-/// Creates the Axum router with GraphQL, GraphiQL playground, REST, and WebSocket routes.
-pub fn create_router(tracker: Arc<CharacterTracker>) -> Router {
+/// Creates the Axum router with GraphQL, optional GraphiQL playground, REST, and WebSocket routes.
+pub fn create_router(tracker: Arc<CharacterTracker>, enable_graphiql: bool) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
@@ -45,11 +45,7 @@ pub fn create_router(tracker: Arc<CharacterTracker>) -> Router {
         schema: schema.clone(),
     };
 
-    Router::new()
-        // Interactive GraphiQL IDE
-        .route("/", get(graphiql_handler))
-        .route("/graphiql", get(graphiql_handler))
-        .route("/graphql", get(graphiql_handler).post(graphql_handler))
+    let mut router = Router::new()
         // GraphQL WebSocket Subscriptions
         .route_service("/graphql/ws", GraphQLSubscription::new(schema))
         // REST Endpoints
@@ -66,23 +62,35 @@ pub fn create_router(tracker: Arc<CharacterTracker>) -> Router {
         .route("/api/markets/world-exchange", get(get_world_exchange))
         .route("/api/markets/einhasad", get(get_einhasad_products))
         // Raw Event WebSocket Stream
-        .route("/ws", get(ws_handler))
-        .layer(cors)
-        .with_state(state)
+        .route("/ws", get(ws_handler));
+
+    if enable_graphiql {
+        router = router
+            .route("/", get(graphiql_handler))
+            .route("/graphiql", get(graphiql_handler))
+            .route("/graphql", get(graphiql_handler).post(graphql_handler));
+    } else {
+        router = router.route("/graphql", post(graphql_handler));
+    }
+
+    router.layer(cors).with_state(state)
 }
 
 /// Starts the embedded API server on the specified port.
 pub async fn start_api_server(
     tracker: Arc<CharacterTracker>,
     port: u16,
+    enable_graphiql: bool,
 ) -> Result<(SocketAddr, tokio::task::JoinHandle<()>), std::io::Error> {
-    let app = create_router(tracker);
+    let app = create_router(tracker, enable_graphiql);
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
     let local_addr = listener.local_addr()?;
 
     info!("🚀 GraphQL & REST API Server listening on http://{}", local_addr);
-    info!("🧭 GraphiQL Interactive IDE active at http://{}/", local_addr);
+    if enable_graphiql {
+        info!("🧭 GraphiQL Interactive IDE active at http://{}/", local_addr);
+    }
     info!("📡 GraphQL WebSocket subscriptions active at ws://{}/graphql/ws", local_addr);
 
     let handle = tokio::spawn(async move {
@@ -265,7 +273,7 @@ mod tests {
             ..Default::default()
         })).await;
 
-        let app = create_router(tracker);
+        let app = create_router(tracker, true);
 
         // Test GET /api/accounts
         let response = app.clone().oneshot(
