@@ -1,7 +1,7 @@
-use std::time::{Duration, Instant};
 use obfstr::obfstr;
 use pcap::{Capture, Device};
 use serde::{Deserialize, Serialize};
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NetworkInterface {
@@ -54,7 +54,6 @@ fn is_physical_nic(desc: &str) -> bool {
         || lower.contains(obfstr!("controller"))
         || lower.contains(obfstr!("adapter"))
 }
-
 
 /// Helper to check if a device has a valid non-loopback, non-APIPA private IPv4.
 fn has_private_ipv4(addresses: &[String]) -> bool {
@@ -149,7 +148,10 @@ pub fn find_device(query: &str) -> Result<Option<NetworkInterface>, pcap::Error>
     }
 
     // 3. Try IP match
-    if let Some(dev) = devices.iter().find(|d| d.addresses.iter().any(|a| a.contains(query))) {
+    if let Some(dev) = devices
+        .iter()
+        .find(|d| d.addresses.iter().any(|a| a.contains(query)))
+    {
         return Ok(Some(dev.clone()));
     }
 

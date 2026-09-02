@@ -1,7 +1,5 @@
 //! Embedded GraphQL, REST, and WebSocket API Server for live sniffer telemetry.
 
-use std::net::SocketAddr;
-use std::sync::Arc;
 use async_graphql::http::GraphiQLSource;
 use async_graphql_axum::{GraphQLRequest, GraphQLResponse, GraphQLSubscription};
 use axum::{
@@ -15,6 +13,8 @@ use axum::{
     Json, Router,
 };
 use futures_util::{SinkExt, StreamExt};
+use std::net::SocketAddr;
+use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 use tracing::{error, info};
 
@@ -87,11 +87,20 @@ pub async fn start_api_server(
     let listener = tokio::net::TcpListener::bind(addr).await?;
     let local_addr = listener.local_addr()?;
 
-    info!("🚀 GraphQL & REST API Server listening on http://{}", local_addr);
+    info!(
+        "🚀 GraphQL & REST API Server listening on http://{}",
+        local_addr
+    );
     if enable_graphiql {
-        info!("🧭 GraphiQL Interactive IDE active at http://{}/", local_addr);
+        info!(
+            "🧭 GraphiQL Interactive IDE active at http://{}/",
+            local_addr
+        );
     }
-    info!("📡 GraphQL WebSocket subscriptions active at ws://{}/graphql/ws", local_addr);
+    info!(
+        "📡 GraphQL WebSocket subscriptions active at ws://{}/graphql/ws",
+        local_addr
+    );
 
     let handle = tokio::spawn(async move {
         if let Err(e) = axum::serve(listener, app).await {
@@ -104,10 +113,7 @@ pub async fn start_api_server(
 
 // =================== GraphQL Route Handlers ===================
 
-async fn graphql_handler(
-    State(state): State<AppState>,
-    req: GraphQLRequest,
-) -> GraphQLResponse {
+async fn graphql_handler(State(state): State<AppState>, req: GraphQLRequest) -> GraphQLResponse {
     state.schema.execute(req.into_inner()).await.into()
 }
 
@@ -192,10 +198,7 @@ async fn get_einhasad_products(State(state): State<AppState>) -> Json<Vec<Einhas
 
 // =================== WebSocket Stream Handler ===================
 
-async fn ws_handler(
-    ws: WebSocketUpgrade,
-    State(state): State<AppState>,
-) -> Response {
+async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
     ws.on_upgrade(|socket| handle_socket(socket, state.tracker))
 }
 
@@ -236,8 +239,10 @@ mod tests {
     use axum::body::Body;
     use axum::http::Request;
     use http_body_util::BodyExt;
+    use l2_sniffer_protocol::{
+        AuthLoginPacket, CharSelectInfoPacket, CharSelectSlot, L2Packet, UserInfoPacket,
+    };
     use tower::ServiceExt;
-    use l2_sniffer_protocol::{AuthLoginPacket, CharSelectInfoPacket, CharSelectSlot, L2Packet, UserInfoPacket};
 
     #[tokio::test]
     async fn test_api_routes() {
@@ -245,40 +250,62 @@ mod tests {
         let client_addr: SocketAddr = "127.0.0.1:54321".parse().unwrap();
 
         // Populate mock state
-        tracker.handle_packet_with_client(Some(client_addr), L2Packet::AuthLogin(AuthLoginPacket {
-            account_name: "TestAccount".into(),
-            session_key1: 1,
-            session_key2: 2,
-        })).await;
+        tracker
+            .handle_packet_with_client(
+                Some(client_addr),
+                L2Packet::AuthLogin(AuthLoginPacket {
+                    account_name: "TestAccount".into(),
+                    session_key1: 1,
+                    session_key2: 2,
+                }),
+            )
+            .await;
 
-        tracker.handle_packet_with_client(Some(client_addr), L2Packet::CharSelectInfo(CharSelectInfoPacket {
-            account_name: "TestAccount".into(),
-            character_slots: vec![CharSelectSlot {
-                name: "TestHero".into(),
-                char_id: 5001,
-                level: 80,
-                class_id: 10,
-                cur_hp: 4500.0,
-                max_hp: 4500.0,
-                ..Default::default()
-            }],
-        })).await;
+        tracker
+            .handle_packet_with_client(
+                Some(client_addr),
+                L2Packet::CharSelectInfo(CharSelectInfoPacket {
+                    account_name: "TestAccount".into(),
+                    character_slots: vec![CharSelectSlot {
+                        name: "TestHero".into(),
+                        char_id: 5001,
+                        level: 80,
+                        class_id: 10,
+                        cur_hp: 4500.0,
+                        max_hp: 4500.0,
+                        ..Default::default()
+                    }],
+                }),
+            )
+            .await;
 
-        tracker.handle_packet_with_client(Some(client_addr), L2Packet::UserInfo(UserInfoPacket {
-            object_id: 5001,
-            name: "TestHero".into(),
-            level: 80,
-            cur_hp: 4500,
-            max_hp: 4500,
-            ..Default::default()
-        })).await;
+        tracker
+            .handle_packet_with_client(
+                Some(client_addr),
+                L2Packet::UserInfo(UserInfoPacket {
+                    object_id: 5001,
+                    name: "TestHero".into(),
+                    level: 80,
+                    cur_hp: 4500,
+                    max_hp: 4500,
+                    ..Default::default()
+                }),
+            )
+            .await;
 
         let app = create_router(tracker, true);
 
         // Test GET /api/accounts
-        let response = app.clone().oneshot(
-            Request::builder().uri("/api/accounts").body(Body::empty()).unwrap()
-        ).await.unwrap();
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/accounts")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         let body = response.into_body().collect().await.unwrap().to_bytes();
         let accounts: Vec<AccountSession> = serde_json::from_slice(&body).unwrap();
@@ -287,9 +314,16 @@ mod tests {
         assert_eq!(accounts[0].active_character, Some("TestHero".to_string()));
 
         // Test GET /api/characters
-        let response = app.clone().oneshot(
-            Request::builder().uri("/api/characters").body(Body::empty()).unwrap()
-        ).await.unwrap();
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/characters")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         let body = response.into_body().collect().await.unwrap().to_bytes();
         let characters: Vec<Character> = serde_json::from_slice(&body).unwrap();
@@ -297,9 +331,16 @@ mod tests {
         assert_eq!(characters[0].name, "TestHero");
 
         // Test GET /api/characters/5001
-        let response = app.clone().oneshot(
-            Request::builder().uri("/api/characters/5001").body(Body::empty()).unwrap()
-        ).await.unwrap();
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/characters/5001")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         let body = response.into_body().collect().await.unwrap().to_bytes();
         let char_info: Character = serde_json::from_slice(&body).unwrap();
@@ -307,29 +348,38 @@ mod tests {
         assert_eq!(char_info.level, 80);
 
         // Test GET / (GraphiQL HTML)
-        let response = app.clone().oneshot(
-            Request::builder().uri("/").body(Body::empty()).unwrap()
-        ).await.unwrap();
+        let response = app
+            .clone()
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
 
         // Test POST /graphql (Query)
         let gql_body = serde_json::json!({
             "query": "{ characters { name level } accounts { accountName activeCharacter } }"
         });
-        let response = app.clone().oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/graphql")
-                .header("Content-Type", "application/json")
-                .body(Body::from(serde_json::to_vec(&gql_body).unwrap()))
-                .unwrap()
-        ).await.unwrap();
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/graphql")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&gql_body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         let body = response.into_body().collect().await.unwrap().to_bytes();
         let gql_res: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(gql_res["data"]["characters"][0]["name"], "TestHero");
         assert_eq!(gql_res["data"]["characters"][0]["level"], 80);
         assert_eq!(gql_res["data"]["accounts"][0]["accountName"], "TestAccount");
-        assert_eq!(gql_res["data"]["accounts"][0]["activeCharacter"], "TestHero");
+        assert_eq!(
+            gql_res["data"]["accounts"][0]["activeCharacter"],
+            "TestHero"
+        );
     }
 }

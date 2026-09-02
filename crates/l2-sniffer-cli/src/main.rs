@@ -2,13 +2,13 @@
 //!
 //! Command line tool to inspect network interfaces, capture packets, and monitor multi-client character statistics live.
 
-use std::collections::HashMap;
-use std::net::SocketAddr;
-use std::sync::Arc;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use l2_sniffer_capture::{list_devices, SessionMessage, SnifferBuilder};
 use l2_sniffer_core::{start_api_server, CharacterTracker, SnifferEvent};
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 
 #[derive(Parser, Debug)]
@@ -61,7 +61,6 @@ enum Commands {
     },
 }
 
-
 fn init_windows_dll_path() {
     #[cfg(target_os = "windows")]
     unsafe {
@@ -94,9 +93,16 @@ async fn main() -> Result<()> {
                         println!("No physical network interfaces found. (Use --show-virtual-nic to view virtual/WAN adapters)");
                     }
                     for (i, dev) in devices.into_iter().enumerate() {
-                        let is_default = default_dev.as_ref().map(|d| d.name == dev.name).unwrap_or(false);
+                        let is_default = default_dev
+                            .as_ref()
+                            .map(|d| d.name == dev.name)
+                            .unwrap_or(false);
                         let star = if is_default { " ⭐ [RECOMMENDED]" } else { "" };
-                        let nic_type = if dev.is_physical { "[Physical NIC]" } else { "[Virtual/WAN]" };
+                        let nic_type = if dev.is_physical {
+                            "[Physical NIC]"
+                        } else {
+                            "[Virtual/WAN]"
+                        };
 
                         println!("{}. Device: {}{}", i + 1, dev.name, star);
                         println!("   Type:        {}", nic_type);
@@ -120,10 +126,19 @@ async fn main() -> Result<()> {
             filter,
             port,
         } => {
-            run_capture_session(device, pcap, filter, port, cli.debug, cli.show_virtual_nic).await?;
+            run_capture_session(device, pcap, filter, port, cli.debug, cli.show_virtual_nic)
+                .await?;
         }
         Commands::Analyze { path, port } => {
-            run_capture_session(None, Some(path), None, port, cli.debug, cli.show_virtual_nic).await?;
+            run_capture_session(
+                None,
+                Some(path),
+                None,
+                port,
+                cli.debug,
+                cli.show_virtual_nic,
+            )
+            .await?;
         }
         Commands::Serve {
             port,
@@ -131,14 +146,24 @@ async fn main() -> Result<()> {
             pcap,
             filter,
         } => {
-            println!("{} {port}...", obfstr::obfstr!("Starting Telemetry Daemon & Web Service on port"));
-            run_capture_session(device, pcap, filter, Some(port), cli.debug, cli.show_virtual_nic).await?;
+            println!(
+                "{} {port}...",
+                obfstr::obfstr!("Starting Telemetry Daemon & Web Service on port")
+            );
+            run_capture_session(
+                device,
+                pcap,
+                filter,
+                Some(port),
+                cli.debug,
+                cli.show_virtual_nic,
+            )
+            .await?;
         }
     }
 
     Ok(())
 }
-
 
 #[derive(Clone)]
 struct DeviceOption {
@@ -169,7 +194,11 @@ fn prompt_for_device(show_virtual_nic: bool) -> Result<Option<String>> {
 
     // Sort devices: Default first, then other physical NICs, then virtual/WAN
     devices.sort_by_key(|dev| {
-        if default_dev.as_ref().map(|d| d.name == dev.name).unwrap_or(false) {
+        if default_dev
+            .as_ref()
+            .map(|d| d.name == dev.name)
+            .unwrap_or(false)
+        {
             0
         } else if dev.is_physical {
             1
@@ -183,7 +212,10 @@ fn prompt_for_device(show_virtual_nic: bool) -> Result<Option<String>> {
     let options: Vec<DeviceOption> = devices
         .iter()
         .map(|dev| {
-            let is_default = default_dev.as_ref().map(|d| d.name == dev.name).unwrap_or(false);
+            let is_default = default_dev
+                .as_ref()
+                .map(|d| d.name == dev.name)
+                .unwrap_or(false);
             let desc = dev.description.as_deref().unwrap_or("Network Adapter");
             let ips = if dev.addresses.is_empty() {
                 "No IP".to_string()
@@ -222,7 +254,9 @@ fn prompt_for_device(show_virtual_nic: bool) -> Result<Option<String>> {
 
     match ans {
         Ok(choice) => Ok(Some(choice.name)),
-        Err(inquire::InquireError::OperationCanceled | inquire::InquireError::OperationInterrupted) => {
+        Err(
+            inquire::InquireError::OperationCanceled | inquire::InquireError::OperationInterrupted,
+        ) => {
             println!("Interface selection canceled.");
             std::process::exit(0);
         }
@@ -290,16 +324,28 @@ async fn run_capture_session(
 
         while let Some(msg) = rx.recv().await {
             match msg {
-                SessionMessage::ClientConnected { client_addr, server_addr } => {
-                    tracker_clone.register_client_connection(client_addr, server_addr).await;
+                SessionMessage::ClientConnected {
+                    client_addr,
+                    server_addr,
+                } => {
+                    tracker_clone
+                        .register_client_connection(client_addr, server_addr)
+                        .await;
                 }
-                SessionMessage::ClientDisconnected { client_addr, reason } => {
-                    tracker_clone.unregister_client_connection(client_addr, reason).await;
+                SessionMessage::ClientDisconnected {
+                    client_addr,
+                    reason,
+                } => {
+                    tracker_clone
+                        .unregister_client_connection(client_addr, reason)
+                        .await;
                 }
                 SessionMessage::Packet(sp) => {
                     total_packets += 1;
                     *client_stats.entry(sp.client_addr).or_insert(0) += 1;
-                    tracker_clone.handle_packet_with_client(Some(sp.client_addr), sp.packet).await;
+                    tracker_clone
+                        .handle_packet_with_client(Some(sp.client_addr), sp.packet)
+                        .await;
                 }
             }
         }
@@ -315,19 +361,50 @@ async fn run_capture_session(
 
         while let Ok(event) = event_rx.recv().await {
             match event {
-                SnifferEvent::ClientConnected { client_addr, server_addr } => {
-                    println!("✨ [CLIENT CONNECTED]    Game client detected: {} <-> Server {}", client_addr, server_addr);
+                SnifferEvent::ClientConnected {
+                    client_addr,
+                    server_addr,
+                } => {
+                    println!(
+                        "✨ [CLIENT CONNECTED]    Game client detected: {} <-> Server {}",
+                        client_addr, server_addr
+                    );
                 }
-                SnifferEvent::ClientDisconnected { client_addr, reason } => {
-                    println!("🔴 [CLIENT DISCONNECTED] Client session closed: {} ({})", client_addr, reason);
+                SnifferEvent::ClientDisconnected {
+                    client_addr,
+                    reason,
+                } => {
+                    println!(
+                        "🔴 [CLIENT DISCONNECTED] Client session closed: {} ({})",
+                        client_addr, reason
+                    );
                 }
-                SnifferEvent::AccountDetected { client_addr, account_name } => {
-                    let client_str = client_addr.map(|a| a.to_string()).unwrap_or_else(|| "-".into());
-                    println!("👤 [ACCOUNT DETECTED]    Account: \"{}\" on [{}]", account_name, client_str);
+                SnifferEvent::AccountDetected {
+                    client_addr,
+                    account_name,
+                } => {
+                    let client_str = client_addr
+                        .map(|a| a.to_string())
+                        .unwrap_or_else(|| "-".into());
+                    println!(
+                        "👤 [ACCOUNT DETECTED]    Account: \"{}\" on [{}]",
+                        account_name, client_str
+                    );
                 }
-                SnifferEvent::AccountRosterLoaded { client_addr, account_name, characters } => {
-                    let client_str = client_addr.map(|a| a.to_string()).unwrap_or_else(|| "-".into());
-                    println!("\n📋 [ACCOUNT ROSTER] Account: \"{}\" [{}] ({} characters):", account_name, client_str, characters.len());
+                SnifferEvent::AccountRosterLoaded {
+                    client_addr,
+                    account_name,
+                    characters,
+                } => {
+                    let client_str = client_addr
+                        .map(|a| a.to_string())
+                        .unwrap_or_else(|| "-".into());
+                    println!(
+                        "\n📋 [ACCOUNT ROSTER] Account: \"{}\" [{}] ({} characters):",
+                        account_name,
+                        client_str,
+                        characters.len()
+                    );
                     println!("┌──────┬────────────────┬───────┬──────────┬───────────────┬─────────┬──────────────┬────────────┬──────┬──────────────────┐");
                     println!("│ Slot │ Name           │ Level │ Class ID │ HP (Cur/Max)  │ EXP %   │ SP           │ Reputation │ VP   │ Last Login       │");
                     println!("├──────┼────────────────┼───────┼──────────┼───────────────┼─────────┼──────────────┼────────────┼──────┼──────────────────┤");
@@ -347,38 +424,80 @@ async fn run_capture_session(
                     }
                     println!("└──────┴────────────────┴───────┴──────────┴───────────────┴─────────┴──────────────┴────────────┴──────┴──────────────────┘\n");
                 }
-                SnifferEvent::CharacterLoaded { client_addr, character } => {
-                    let client_str = client_addr.map(|a| a.to_string()).unwrap_or_else(|| "Unknown".into());
-                    let acc_str = character.account_name.as_deref().map(|a| format!("Account: \"{}\" | ", a)).unwrap_or_default();
+                SnifferEvent::CharacterLoaded {
+                    client_addr,
+                    character,
+                } => {
+                    let client_str = client_addr
+                        .map(|a| a.to_string())
+                        .unwrap_or_else(|| "Unknown".into());
+                    let acc_str = character
+                        .account_name
+                        .as_deref()
+                        .map(|a| format!("Account: \"{}\" | ", a))
+                        .unwrap_or_default();
                     println!("👤 [CHARACTER] Client: {:<21} | {}Name: {:<16} | Level: {:<3} | Class ID: {:<3} | HP: {}/{}",
                         client_str, acc_str, character.name, character.level, character.class_id, character.vitals.cur_hp, character.vitals.max_hp);
                 }
-                SnifferEvent::VitalsChanged { client_addr, object_id, vitals } => {
-                    let client_str = client_addr.map(|a| a.to_string()).unwrap_or_else(|| "-".into());
-                    println!("❤️ [VITALS]    Client: {:<21} | Obj {}: HP: {}/{} | MP: {}/{}",
-                        client_str, object_id, vitals.cur_hp, vitals.max_hp, vitals.cur_mp, vitals.max_mp);
+                SnifferEvent::VitalsChanged {
+                    client_addr,
+                    object_id,
+                    vitals,
+                } => {
+                    let client_str = client_addr
+                        .map(|a| a.to_string())
+                        .unwrap_or_else(|| "-".into());
+                    println!(
+                        "❤️ [VITALS]    Client: {:<21} | Obj {}: HP: {}/{} | MP: {}/{}",
+                        client_str,
+                        object_id,
+                        vitals.cur_hp,
+                        vitals.max_hp,
+                        vitals.cur_mp,
+                        vitals.max_mp
+                    );
                 }
-                SnifferEvent::SkillsUpdated { client_addr, object_id, skills } => {
+                SnifferEvent::SkillsUpdated {
+                    client_addr,
+                    object_id,
+                    skills,
+                } => {
                     if last_skills.get(&object_id) == Some(&skills.len()) {
                         continue;
                     }
                     last_skills.insert(object_id, skills.len());
-                    let client_str = client_addr.map(|a| a.to_string()).unwrap_or_else(|| "-".into());
+                    let client_str = client_addr
+                        .map(|a| a.to_string())
+                        .unwrap_or_else(|| "-".into());
                     let passives = skills.iter().filter(|s| s.is_passive).count();
                     let actives = skills.len() - passives;
                     println!("🔮 [SKILLS]    Client: {:<21} | Obj {}: Loaded {} skills ({} active, {} passive)",
                         client_str, object_id, skills.len(), actives, passives);
                 }
-                SnifferEvent::BuffsUpdated { client_addr, object_id, buffs } => {
+                SnifferEvent::BuffsUpdated {
+                    client_addr,
+                    object_id,
+                    buffs,
+                } => {
                     if last_buffs.get(&object_id) == Some(&buffs.len()) {
                         continue;
                     }
                     last_buffs.insert(object_id, buffs.len());
-                    let client_str = client_addr.map(|a| a.to_string()).unwrap_or_else(|| "-".into());
-                    println!("🌟 [BUFFS]     Client: {:<21} | Obj {}: {} active buff effects",
-                        client_str, object_id, buffs.len());
+                    let client_str = client_addr
+                        .map(|a| a.to_string())
+                        .unwrap_or_else(|| "-".into());
+                    println!(
+                        "🌟 [BUFFS]     Client: {:<21} | Obj {}: {} active buff effects",
+                        client_str,
+                        object_id,
+                        buffs.len()
+                    );
                 }
-                SnifferEvent::InventoryLoaded { client_addr, object_id, items } => {
+                SnifferEvent::InventoryLoaded {
+                    client_addr,
+                    object_id,
+                    items,
+                } => {
                     if items.is_empty() && last_inventory.contains_key(&object_id) {
                         continue;
                     }
@@ -386,30 +505,58 @@ async fn run_capture_session(
                         continue;
                     }
                     last_inventory.insert(object_id, items.len());
-                    let client_str = client_addr.map(|a| a.to_string()).unwrap_or_else(|| "-".into());
+                    let client_str = client_addr
+                        .map(|a| a.to_string())
+                        .unwrap_or_else(|| "-".into());
                     let equipped = items.iter().filter(|i| i.equipped).count();
-                    println!("🎒 [INVENTORY] Client: {:<21} | Obj {}: {} items ({} equipped)",
-                        client_str, object_id, items.len(), equipped);
+                    println!(
+                        "🎒 [INVENTORY] Client: {:<21} | Obj {}: {} items ({} equipped)",
+                        client_str,
+                        object_id,
+                        items.len(),
+                        equipped
+                    );
                 }
-                SnifferEvent::WarehouseLoaded { client_addr, object_id, wh_type, player_adena, items } => {
-                    let client_str = client_addr.map(|a| a.to_string()).unwrap_or_else(|| "-".into());
+                SnifferEvent::WarehouseLoaded {
+                    client_addr,
+                    object_id,
+                    wh_type,
+                    player_adena,
+                    items,
+                } => {
+                    let client_str = client_addr
+                        .map(|a| a.to_string())
+                        .unwrap_or_else(|| "-".into());
                     println!("🏛️ [WAREHOUSE] Client: {:<21} | Obj {}: {:?} warehouse ({} items, {} adena)",
                         client_str, object_id, wh_type, items.len(), format_number(player_adena));
                 }
                 SnifferEvent::PrivateStoreUpdated { client_addr, store } => {
-                    let client_str = client_addr.map(|a| a.to_string()).unwrap_or_else(|| "-".into());
-                    let seller = store.seller_name.unwrap_or_else(|| format!("Obj {}", store.seller_object_id));
+                    let client_str = client_addr
+                        .map(|a| a.to_string())
+                        .unwrap_or_else(|| "-".into());
+                    let seller = store
+                        .seller_name
+                        .unwrap_or_else(|| format!("Obj {}", store.seller_object_id));
                     println!("🏪 [STORE]     Client: {:<21} | {:?} Store by \"{}\" ('{}') - {} items listed",
                         client_str, store.store_type, seller, store.store_title, store.items.len());
                 }
                 SnifferEvent::CommissionMarketUpdated { items } => {
-                    println!("🏛️ [AUCTION]   Auction House Commission updated: {} items listed", items.len());
+                    println!(
+                        "🏛️ [AUCTION]   Auction House Commission updated: {} items listed",
+                        items.len()
+                    );
                 }
                 SnifferEvent::WorldExchangeUpdated { items } => {
-                    println!("🌐 [EXCHANGE]  World Exchange Market updated: {} items listed", items.len());
+                    println!(
+                        "🌐 [EXCHANGE]  World Exchange Market updated: {} items listed",
+                        items.len()
+                    );
                 }
                 SnifferEvent::EinhasadStoreUpdated { products } => {
-                    println!("🪙 [EINHASAD]  Einhasad Gold Coin Store updated: {} offerings available", products.len());
+                    println!(
+                        "🪙 [EINHASAD]  Einhasad Gold Coin Store updated: {} offerings available",
+                        products.len()
+                    );
                 }
                 _ => {}
             }
@@ -430,8 +577,12 @@ async fn run_capture_session(
     if !accounts.is_empty() {
         println!("Accounts Detected:     {}", accounts.len());
         for acc in &accounts {
-            println!(" - Account \"{}\" (Client: {}) -> {} characters in roster",
-                acc.account_name, acc.client_addr, acc.character_roster.len());
+            println!(
+                " - Account \"{}\" (Client: {}) -> {} characters in roster",
+                acc.account_name,
+                acc.client_addr,
+                acc.character_roster.len()
+            );
         }
     }
     if !tracked.is_empty() {
@@ -441,16 +592,25 @@ async fn run_capture_session(
                 c.name, c.level, c.class_id, c.skills.len(), c.buffs.len(), c.inventory.len(), c.warehouse.len());
         }
     }
-    if !market.private_stores.is_empty() || !market.commission_items.is_empty() || !market.world_exchange_items.is_empty() {
+    if !market.private_stores.is_empty()
+        || !market.commission_items.is_empty()
+        || !market.world_exchange_items.is_empty()
+    {
         println!("\nMarket Activity Summary:");
         if !market.private_stores.is_empty() {
             println!(" - Active Private Stores: {}", market.private_stores.len());
         }
         if !market.commission_items.is_empty() {
-            println!(" - Commission Auctions:   {}", market.commission_items.len());
+            println!(
+                " - Commission Auctions:   {}",
+                market.commission_items.len()
+            );
         }
         if !market.world_exchange_items.is_empty() {
-            println!(" - World Exchange Items:  {}", market.world_exchange_items.len());
+            println!(
+                " - World Exchange Items:  {}",
+                market.world_exchange_items.len()
+            );
         }
     }
     println!("\nActive Client Sessions:");
@@ -458,7 +618,11 @@ async fn run_capture_session(
     sorted_clients.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
 
     for (addr, count) in sorted_clients {
-        println!(" - Client Endpoint: {:<22} | Packets: {:>6}", addr.to_string(), count);
+        println!(
+            " - Client Endpoint: {:<22} | Packets: {:>6}",
+            addr.to_string(),
+            count
+        );
     }
     println!("====================================================\n");
 
@@ -475,7 +639,11 @@ fn format_unix_timestamp(ts: u32) -> String {
 
     let mut year = 1970;
     loop {
-        let leap = if (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0) { 1 } else { 0 };
+        let leap = if (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0) {
+            1
+        } else {
+            0
+        };
         let days_in_year = 365 + leap;
         if days < days_in_year {
             let month_days = [31, 28 + leap, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];

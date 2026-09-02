@@ -21,7 +21,7 @@ l2-character-sniffer/
 | **`l2-sniffer-protocol`** | Library | Lineage 2 packet framing (`L2FrameCodec`), opcode registry (`ServerOpcode`), Blowfish / XOR decryption (`L2Cryptor`), and packet parsers (`UserInfo`, `StatusUpdate`, `ItemList`, etc.). |
 | **`l2-sniffer-capture`** | Library | Packet capture engine using Npcap/libpcap, device discovery, and streaming packet worker. |
 | **`l2-sniffer-core`** | Library | Decoupled domain models (`Character`, `Vitals`, `Stats`, `Location`) and state tracker (`CharacterTracker`). |
-| **`l2-sniffer-cli`** | Binary | Standalone CLI (`l2-sniffer devices`, `l2-sniffer sniff`) for interface inspection and terminal monitoring. |
+| **`l2-sniffer-cli`** | Binary | Standalone CLI / Daemon (`l2-character-daemon devices`, `l2-character-daemon sniff`) for interface inspection and terminal monitoring. |
 
 ---
 

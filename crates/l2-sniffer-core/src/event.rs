@@ -1,8 +1,8 @@
 //! Character and Account state update events.
 
-use std::net::SocketAddr;
-use serde::{Deserialize, Serialize};
 use crate::model::{CharSelectSlot, Character, Location, Vitals};
+use serde::{Deserialize, Serialize};
+use std::net::SocketAddr;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "event", content = "payload")]

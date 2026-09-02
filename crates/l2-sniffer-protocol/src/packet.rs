@@ -402,13 +402,22 @@ impl L2Packet {
     }
 
     /// Parses modern retail character selection roster (Opcode 0x09)
-    fn parse_char_select_info_retail(r: &mut Cursor<&[u8]>, raw: &[u8]) -> Result<CharSelectInfoPacket, std::io::Error> {
+    fn parse_char_select_info_retail(
+        r: &mut Cursor<&[u8]>,
+        raw: &[u8],
+    ) -> Result<CharSelectInfoPacket, std::io::Error> {
         if raw.len() < 16 {
-            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Packet too short"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "Packet too short",
+            ));
         }
         let count = r.read_u32::<LittleEndian>()?;
         if count == 0 || count > 50 {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid character count"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Invalid character count",
+            ));
         }
         let _max_slots = r.read_u32::<LittleEndian>()?;
         let _active = r.read_u8()?;
@@ -421,7 +430,9 @@ impl L2Packet {
 
         for i in 0..count {
             if let Ok(name) = read_l2_string(r) {
-                if name.is_empty() { break; }
+                if name.is_empty() {
+                    break;
+                }
                 let char_id = r.read_u32::<LittleEndian>().unwrap_or_default();
                 let title = read_l2_string(r).unwrap_or_default();
                 let session_id = r.read_u32::<LittleEndian>().unwrap_or_default();
@@ -442,7 +453,11 @@ impl L2Packet {
                 let sp = r.read_u64::<LittleEndian>().unwrap_or_default();
                 let exp = r.read_u64::<LittleEndian>().unwrap_or_default();
                 let exp_pct_raw = r.read_f64::<LittleEndian>().unwrap_or_default();
-                let exp_percent = if exp_pct_raw <= 1.0 { exp_pct_raw * 100.0 } else { exp_pct_raw };
+                let exp_percent = if exp_pct_raw <= 1.0 {
+                    exp_pct_raw * 100.0
+                } else {
+                    exp_pct_raw
+                };
                 let level = r.read_u32::<LittleEndian>().unwrap_or_default();
                 let reputation = r.read_i32::<LittleEndian>().unwrap_or_default();
                 let pk_kills = r.read_u32::<LittleEndian>().unwrap_or_default();
@@ -488,13 +503,26 @@ impl L2Packet {
                     for offset in 100..raw.len().saturating_sub(pos + 30) {
                         let candidate_pos = pos + offset;
                         // Check if bytes at candidate_pos form a valid UTF-16 name followed by u32 and account name
-                        if candidate_pos + 4 < raw.len() && raw[candidate_pos + 1] == 0 && raw[candidate_pos].is_ascii_alphanumeric() {
+                        if candidate_pos + 4 < raw.len()
+                            && raw[candidate_pos + 1] == 0
+                            && raw[candidate_pos].is_ascii_alphanumeric()
+                        {
                             let mut test_r = Cursor::new(&raw[candidate_pos..]);
                             if let Ok(test_name) = read_l2_string(&mut test_r) {
-                                if test_name.len() >= 2 && test_name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-                                    let _test_id = test_r.read_u32::<LittleEndian>().unwrap_or_default();
+                                if test_name.len() >= 2
+                                    && test_name
+                                        .chars()
+                                        .all(|c| c.is_ascii_alphanumeric() || c == '_')
+                                {
+                                    let _test_id =
+                                        test_r.read_u32::<LittleEndian>().unwrap_or_default();
                                     if let Ok(test_acc) = read_l2_string(&mut test_r) {
-                                        if test_acc == account_name || (test_acc.len() >= 2 && test_acc.chars().all(|c| c.is_ascii_alphanumeric())) {
+                                        if test_acc == account_name
+                                            || (test_acc.len() >= 2
+                                                && test_acc
+                                                    .chars()
+                                                    .all(|c| c.is_ascii_alphanumeric()))
+                                        {
                                             r.set_position(candidate_pos as u64);
                                             found = true;
                                             break;
@@ -530,7 +558,8 @@ impl L2Packet {
                 // Client Extended Opcode 0xD0
                 if payload.len() >= 2 {
                     let sub_op = u16::from_le_bytes([payload[0], payload[1]]);
-                    if sub_op == 0x0240 || sub_op == 0x0008 || sub_op == 0x002b || sub_op == 0x0001 {
+                    if sub_op == 0x0240 || sub_op == 0x0008 || sub_op == 0x002b || sub_op == 0x0001
+                    {
                         let mut sub_cursor = Cursor::new(&payload[2..]);
                         if let Ok(auth) = Self::parse_auth_login(&mut sub_cursor) {
                             return L2Packet::AuthLogin(auth);
@@ -549,12 +578,23 @@ impl L2Packet {
     /// Parses modern retail CharSelected (Opcode 0x0B)
     fn parse_char_selected_retail(r: &mut Cursor<&[u8]>) -> Result<UserInfoPacket, std::io::Error> {
         let name = read_l2_string(r)?;
-        if name.len() < 2 || name.len() > 32 || !name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == ' ') {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid character name"));
+        if name.len() < 2
+            || name.len() > 32
+            || !name
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == ' ')
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Invalid character name",
+            ));
         }
         let object_id = r.read_u32::<LittleEndian>()?;
         if object_id == 0 {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid character object_id"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Invalid character object_id",
+            ));
         }
         let _padding = r.read_u16::<LittleEndian>().unwrap_or_default();
         let session_id = r.read_u32::<LittleEndian>().unwrap_or_default();
@@ -564,19 +604,34 @@ impl L2Packet {
         let _race = r.read_u32::<LittleEndian>().unwrap_or_default();
         let class_id = r.read_u32::<LittleEndian>().unwrap_or_default();
         if class_id > 300 {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid class_id"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Invalid class_id",
+            ));
         }
         let _active = r.read_u32::<LittleEndian>().unwrap_or_default();
         let x = r.read_i32::<LittleEndian>().unwrap_or_default();
         let y = r.read_i32::<LittleEndian>().unwrap_or_default();
         let z = r.read_i32::<LittleEndian>().unwrap_or_default();
-        let cur_hp = r.read_f64::<LittleEndian>().map(|v| v as u32).unwrap_or_default();
-        let cur_mp = r.read_f64::<LittleEndian>().map(|v| v as u32).unwrap_or_default();
-        let sp = r.read_u64::<LittleEndian>().map(|v| v as u32).unwrap_or_default();
+        let cur_hp = r
+            .read_f64::<LittleEndian>()
+            .map(|v| v as u32)
+            .unwrap_or_default();
+        let cur_mp = r
+            .read_f64::<LittleEndian>()
+            .map(|v| v as u32)
+            .unwrap_or_default();
+        let sp = r
+            .read_u64::<LittleEndian>()
+            .map(|v| v as u32)
+            .unwrap_or_default();
         let exp = r.read_u64::<LittleEndian>().unwrap_or_default();
         let level = r.read_u32::<LittleEndian>().unwrap_or_default();
         if level == 0 || level > 130 {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid character level"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Invalid character level",
+            ));
         }
 
         Ok(UserInfoPacket {
@@ -603,12 +658,21 @@ impl L2Packet {
     fn parse_auth_login(r: &mut Cursor<&[u8]>) -> Result<AuthLoginPacket, std::io::Error> {
         let raw_buf = *r.get_ref();
         let start_pos = r.position() as usize;
-        let slice = if start_pos < raw_buf.len() { &raw_buf[start_pos..] } else { raw_buf };
+        let slice = if start_pos < raw_buf.len() {
+            &raw_buf[start_pos..]
+        } else {
+            raw_buf
+        };
 
         // 1. Try reading standard L2 format (Account name string first: UTF-16 / ASCII)
         let mut test_r = Cursor::new(slice);
         if let Ok(name) = read_l2_string(&mut test_r).or_else(|_| read_ascii_string(&mut test_r)) {
-            if name.len() >= 2 && name.len() <= 32 && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+            if name.len() >= 2
+                && name.len() <= 32
+                && name
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+            {
                 let session_key1 = test_r.read_u32::<LittleEndian>().unwrap_or_default();
                 let session_key2 = test_r.read_u32::<LittleEndian>().unwrap_or_default();
                 return Ok(AuthLoginPacket {
@@ -630,7 +694,12 @@ impl L2Packet {
         };
         let session_key2 = retail_r.read_u32::<LittleEndian>().unwrap_or_default();
 
-        if !raw_name.is_empty() && raw_name.len() <= 32 && raw_name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        if !raw_name.is_empty()
+            && raw_name.len() <= 32
+            && raw_name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        {
             return Ok(AuthLoginPacket {
                 account_name: raw_name,
                 session_key1,
@@ -646,14 +715,20 @@ impl L2Packet {
             });
         }
 
-        Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid auth login payload"))
+        Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Invalid auth login payload",
+        ))
     }
 
     fn parse_status_update(r: &mut Cursor<&[u8]>) -> Result<StatusUpdatePacket, std::io::Error> {
         let object_id = r.read_u32::<LittleEndian>()?;
         let count = r.read_u32::<LittleEndian>()?;
         if count > 200 {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Too many status attributes"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Too many status attributes",
+            ));
         }
         let mut attributes = Vec::with_capacity(count as usize);
 
@@ -672,10 +747,17 @@ impl L2Packet {
     fn parse_item_list(r: &mut Cursor<&[u8]>) -> Result<ItemListPacket, std::io::Error> {
         let raw_buf = *r.get_ref();
         let start_pos = r.position() as usize;
-        let slice = if start_pos < raw_buf.len() { &raw_buf[start_pos..] } else { raw_buf };
+        let slice = if start_pos < raw_buf.len() {
+            &raw_buf[start_pos..]
+        } else {
+            raw_buf
+        };
 
         if slice.len() < 3 {
-            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "ItemList payload too short"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "ItemList payload too short",
+            ));
         }
 
         // Try candidate header layouts:
@@ -692,7 +774,10 @@ impl L2Packet {
             let cnt_b = u16::from_le_bytes([slice[2], slice[3]]) as usize;
             if cnt_b > 0 && cnt_b <= 500 {
                 let remaining = slice.len() - 4;
-                if remaining >= cnt_b && (remaining % cnt_b == 0 || (remaining / cnt_b >= 32 && remaining / cnt_b <= 96)) {
+                if remaining >= cnt_b
+                    && (remaining % cnt_b == 0
+                        || (remaining / cnt_b >= 32 && remaining / cnt_b <= 96))
+                {
                     best_show_window = slice[0] != 0;
                     best_count = cnt_b;
                     best_offset = 4;
@@ -705,7 +790,10 @@ impl L2Packet {
             let cnt_a = u16::from_le_bytes([slice[1], slice[2]]) as usize;
             if cnt_a > 0 && cnt_a <= 500 {
                 let remaining = slice.len() - 3;
-                if remaining >= cnt_a && (remaining % cnt_a == 0 || (remaining / cnt_a >= 32 && remaining / cnt_a <= 96)) {
+                if remaining >= cnt_a
+                    && (remaining % cnt_a == 0
+                        || (remaining / cnt_a >= 32 && remaining / cnt_a <= 96))
+                {
                     best_show_window = slice[0] != 0;
                     best_count = cnt_a;
                     best_offset = 3;
@@ -721,7 +809,10 @@ impl L2Packet {
         }
 
         if best_count > 500 {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Too many items in ItemList"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Too many items in ItemList",
+            ));
         }
 
         let item_payload = &slice[best_offset..];
@@ -733,18 +824,30 @@ impl L2Packet {
         })
     }
 
-    fn parse_inventory_update(r: &mut Cursor<&[u8]>) -> Result<InventoryUpdatePacket, std::io::Error> {
+    fn parse_inventory_update(
+        r: &mut Cursor<&[u8]>,
+    ) -> Result<InventoryUpdatePacket, std::io::Error> {
         let raw_buf = *r.get_ref();
         let start_pos = r.position() as usize;
-        let slice = if start_pos < raw_buf.len() { &raw_buf[start_pos..] } else { raw_buf };
+        let slice = if start_pos < raw_buf.len() {
+            &raw_buf[start_pos..]
+        } else {
+            raw_buf
+        };
 
         if slice.len() < 2 {
-            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "InventoryUpdate payload too short"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "InventoryUpdate payload too short",
+            ));
         }
 
         let count = u16::from_le_bytes([slice[0], slice[1]]) as usize;
         if count > 500 {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Too many items in InventoryUpdate"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Too many items in InventoryUpdate",
+            ));
         }
 
         let item_payload = &slice[2..];
@@ -753,7 +856,10 @@ impl L2Packet {
         Ok(InventoryUpdatePacket { items })
     }
 
-    fn parse_warehouse_list(r: &mut Cursor<&[u8]>, opcode: u8) -> Result<WarehouseListPacket, std::io::Error> {
+    fn parse_warehouse_list(
+        r: &mut Cursor<&[u8]>,
+        opcode: u8,
+    ) -> Result<WarehouseListPacket, std::io::Error> {
         let raw_type = r.read_u16::<LittleEndian>().unwrap_or(0);
         let wh_type = match raw_type {
             1 => WarehouseType::Private,
@@ -761,24 +867,44 @@ impl L2Packet {
             3 => WarehouseType::Castle,
             4 => WarehouseType::Freight,
             5 => WarehouseType::Package,
-            _ => return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid warehouse type")),
+            _ => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Invalid warehouse type",
+                ))
+            }
         };
         let player_adena = if opcode == 0x42 {
-            r.read_u64::<LittleEndian>().or_else(|_| r.read_u32::<LittleEndian>().map(|v| v as u64)).unwrap_or_default()
+            r.read_u64::<LittleEndian>()
+                .or_else(|_| r.read_u32::<LittleEndian>().map(|v| v as u64))
+                .unwrap_or_default()
         } else {
             0
         };
         if player_adena > 100_000_000_000 {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid warehouse adena"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Invalid warehouse adena",
+            ));
         }
-        let count = r.read_u16::<LittleEndian>().map(|c| c as usize).unwrap_or_default();
+        let count = r
+            .read_u16::<LittleEndian>()
+            .map(|c| c as usize)
+            .unwrap_or_default();
         if count > 500 {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Too many warehouse items"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Too many warehouse items",
+            ));
         }
 
         let raw_buf = *r.get_ref();
         let pos = r.position() as usize;
-        let item_payload = if pos < raw_buf.len() { &raw_buf[pos..] } else { &[] };
+        let item_payload = if pos < raw_buf.len() {
+            &raw_buf[pos..]
+        } else {
+            &[]
+        };
         let items = Self::parse_item_array(item_payload, count);
 
         Ok(WarehouseListPacket {
@@ -833,25 +959,56 @@ impl L2Packet {
             let l_slot = u32::from_le_bytes([buf[10], buf[11], buf[12], buf[13]]);
             let l_count = if buf.len() >= 26 {
                 u64::from_le_bytes([
-                    buf[14], buf[15], buf[16], buf[17],
-                    buf[18], buf[19], buf[20], buf[21],
+                    buf[14], buf[15], buf[16], buf[17], buf[18], buf[19], buf[20], buf[21],
                 ])
             } else {
                 u32::from_le_bytes([buf[14], buf[15], buf[16], buf[17]]) as u64
             };
 
             // If legacy item_type1 is 0..3, and l_item is a valid item ID, and m_item has 0 in lower 16 bits (due to shift)
-            let m_item_raw = if buf.len() >= 8 { u32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]) } else { 0 };
-            let is_legacy = l_type <= 3 && l_item > 0 && l_item < 5_000_000 && l_count > 0 && l_count < 100_000_000_000
+            let m_item_raw = if buf.len() >= 8 {
+                u32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]])
+            } else {
+                0
+            };
+            let is_legacy = l_type <= 3
+                && l_item > 0
+                && l_item < 5_000_000
+                && l_count > 0
+                && l_count < 100_000_000_000
                 && (m_item_raw & 0xFFFF == 0 || (m_item_raw > 1_000_000 && l_item < 100_000));
 
             if is_legacy {
-                let custom_type1 = if buf.len() >= 20 { u16::from_le_bytes([buf[18], buf[19]]) } else { 0 };
-                let equipped = if buf.len() >= 22 { u16::from_le_bytes([buf[20], buf[21]]) != 0 } else { false };
-                let enchant_level = if buf.len() >= 28 { u16::from_le_bytes([buf[26], buf[27]]) } else { 0 };
-                let is_augmented = if buf.len() >= 34 { u32::from_le_bytes([buf[30], buf[31], buf[32], buf[33]]) != 0 } else { false };
-                let mana = if buf.len() >= 38 { i32::from_le_bytes([buf[34], buf[35], buf[36], buf[37]]) } else { -1 };
-                let durability = if buf.len() >= 42 { i32::from_le_bytes([buf[38], buf[39], buf[40], buf[41]]) } else { -1 };
+                let custom_type1 = if buf.len() >= 20 {
+                    u16::from_le_bytes([buf[18], buf[19]])
+                } else {
+                    0
+                };
+                let equipped = if buf.len() >= 22 {
+                    u16::from_le_bytes([buf[20], buf[21]]) != 0
+                } else {
+                    false
+                };
+                let enchant_level = if buf.len() >= 28 {
+                    u16::from_le_bytes([buf[26], buf[27]])
+                } else {
+                    0
+                };
+                let is_augmented = if buf.len() >= 34 {
+                    u32::from_le_bytes([buf[30], buf[31], buf[32], buf[33]]) != 0
+                } else {
+                    false
+                };
+                let mana = if buf.len() >= 38 {
+                    i32::from_le_bytes([buf[34], buf[35], buf[36], buf[37]])
+                } else {
+                    -1
+                };
+                let durability = if buf.len() >= 42 {
+                    i32::from_le_bytes([buf[38], buf[39], buf[40], buf[41]])
+                } else {
+                    -1
+                };
 
                 // Resolve item_type: 0=Weapon, 1=Armor, 2=Accessory, 3=Quest, 4=Currency, 5=EtcItem
                 let item_type = if l_type > 0 {
@@ -891,37 +1048,92 @@ impl L2Packet {
         let m_slot = u32::from_le_bytes([buf[8], buf[9], buf[10], buf[11]]);
         let m_count = if buf.len() >= 20 {
             u64::from_le_bytes([
-                buf[12], buf[13], buf[14], buf[15],
-                buf[16], buf[17], buf[18], buf[19],
+                buf[12], buf[13], buf[14], buf[15], buf[16], buf[17], buf[18], buf[19],
             ])
         } else {
             u32::from_le_bytes([buf[12], buf[13], buf[14], buf[15]]) as u64
         };
 
-        let modern_valid = m_item > 0 && m_item < 5_000_000 && m_count > 0 && m_count < 100_000_000_000;
+        let modern_valid =
+            m_item > 0 && m_item < 5_000_000 && m_count > 0 && m_count < 100_000_000_000;
 
         if modern_valid {
-            let item_type_raw = if buf.len() >= 22 { u16::from_le_bytes([buf[20], buf[21]]) } else { 0 };
-            let custom_type1 = if buf.len() >= 24 { u16::from_le_bytes([buf[22], buf[23]]) } else { 0 };
-            let equipped = if buf.len() >= 26 { u16::from_le_bytes([buf[24], buf[25]]) != 0 } else { false };
-            let body_part = if buf.len() >= 30 { u32::from_le_bytes([buf[26], buf[27], buf[28], buf[29]]) } else { 0 };
-            let enchant_level = if buf.len() >= 32 { u16::from_le_bytes([buf[30], buf[31]]) } else { 0 };
-            let custom_type2 = if buf.len() >= 34 { u16::from_le_bytes([buf[32], buf[33]]) } else { 0 };
-            let is_augmented = if buf.len() >= 38 { u32::from_le_bytes([buf[34], buf[35], buf[36], buf[37]]) != 0 } else { false };
-            let mana = if buf.len() >= 42 { i32::from_le_bytes([buf[38], buf[39], buf[40], buf[41]]) } else { -1 };
-            let durability = if buf.len() >= 46 { i32::from_le_bytes([buf[42], buf[43], buf[44], buf[45]]) } else { -1 };
+            let item_type_raw = if buf.len() >= 22 {
+                u16::from_le_bytes([buf[20], buf[21]])
+            } else {
+                0
+            };
+            let custom_type1 = if buf.len() >= 24 {
+                u16::from_le_bytes([buf[22], buf[23]])
+            } else {
+                0
+            };
+            let equipped = if buf.len() >= 26 {
+                u16::from_le_bytes([buf[24], buf[25]]) != 0
+            } else {
+                false
+            };
+            let body_part = if buf.len() >= 30 {
+                u32::from_le_bytes([buf[26], buf[27], buf[28], buf[29]])
+            } else {
+                0
+            };
+            let enchant_level = if buf.len() >= 32 {
+                u16::from_le_bytes([buf[30], buf[31]])
+            } else {
+                0
+            };
+            let custom_type2 = if buf.len() >= 34 {
+                u16::from_le_bytes([buf[32], buf[33]])
+            } else {
+                0
+            };
+            let is_augmented = if buf.len() >= 38 {
+                u32::from_le_bytes([buf[34], buf[35], buf[36], buf[37]]) != 0
+            } else {
+                false
+            };
+            let mana = if buf.len() >= 42 {
+                i32::from_le_bytes([buf[38], buf[39], buf[40], buf[41]])
+            } else {
+                -1
+            };
+            let durability = if buf.len() >= 46 {
+                i32::from_le_bytes([buf[42], buf[43], buf[44], buf[45]])
+            } else {
+                -1
+            };
 
             // Resolve item_type: 0=Weapon, 1=Shield/Armor, 2=Accessory/Jewelry, 3=Quest, 4=Currency, 5=EtcItem/Consumable
             let item_type = if item_type_raw > 0 {
                 item_type_raw
-            } else if m_item == 57 || m_item == 5575 || m_item == 5560 || m_item == 37000 || m_item == 40000 {
+            } else if m_item == 57
+                || m_item == 5575
+                || m_item == 5560
+                || m_item == 37000
+                || m_item == 40000
+            {
                 4 // Currency (Adena / L-Coin)
             } else if body_part != 0 {
                 if (body_part & 0x4080) != 0 {
                     0 // Weapon (R_HAND, LR_HAND)
-                } else if (body_part & (0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020 | 0x100000 | 0x200000 | 0x400000)) != 0 {
+                } else if (body_part
+                    & (0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020 | 0x100000 | 0x200000 | 0x400000))
+                    != 0
+                {
                     2 // Jewelry / Accessory (EAR, NECK, FINGER, HAIR)
-                } else if (body_part & (0x0100 | 0x0200 | 0x0400 | 0x0800 | 0x1000 | 0x2000 | 0x8000 | 0x10000 | 0x20000)) != 0 {
+                } else if (body_part
+                    & (0x0100
+                        | 0x0200
+                        | 0x0400
+                        | 0x0800
+                        | 0x1000
+                        | 0x2000
+                        | 0x8000
+                        | 0x10000
+                        | 0x20000))
+                    != 0
+                {
                     1 // Shield / Armor (CHEST, LEGS, GLOVES, FEET, HELM, CLOAK, BELT)
                 } else {
                     0
@@ -958,7 +1170,11 @@ impl L2Packet {
         Some(ItemInfo {
             object_id: m_obj,
             item_id: m_item,
-            count: if m_count > 0 && m_count < 100_000_000_000 { m_count } else { 1 },
+            count: if m_count > 0 && m_count < 100_000_000_000 {
+                m_count
+            } else {
+                1
+            },
             item_type: 0,
             item_type_name: item_type_to_name(0).to_string(),
             equipped: false,
@@ -974,11 +1190,17 @@ impl L2Packet {
     fn parse_skill_list(r: &mut Cursor<&[u8]>) -> Result<SkillListPacket, std::io::Error> {
         let count = r.read_u32::<LittleEndian>().map(|c| c as usize)?;
         if count > 2000 {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Too many skills"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Too many skills",
+            ));
         }
         let mut skills = Vec::with_capacity(count);
         for _ in 0..count {
-            let is_passive = r.read_u32::<LittleEndian>().map(|v| v != 0).unwrap_or(false);
+            let is_passive = r
+                .read_u32::<LittleEndian>()
+                .map(|v| v != 0)
+                .unwrap_or(false);
             let level = r.read_u32::<LittleEndian>().unwrap_or(1);
             let skill_id = r.read_u32::<LittleEndian>().unwrap_or(0);
             let is_disabled = r.read_u8().map(|v| v != 0).unwrap_or(false);
@@ -998,15 +1220,27 @@ impl L2Packet {
         Ok(SkillListPacket { skills })
     }
 
-    fn parse_magic_effect_icons(r: &mut Cursor<&[u8]>) -> Result<MagicEffectIconsPacket, std::io::Error> {
-        let count = r.read_u16::<LittleEndian>().map(|c| c as usize).or_else(|_| r.read_u32::<LittleEndian>().map(|c| c as usize))?;
+    fn parse_magic_effect_icons(
+        r: &mut Cursor<&[u8]>,
+    ) -> Result<MagicEffectIconsPacket, std::io::Error> {
+        let count = r
+            .read_u16::<LittleEndian>()
+            .map(|c| c as usize)
+            .or_else(|_| r.read_u32::<LittleEndian>().map(|c| c as usize))?;
         if count > 200 {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Too many effects"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Too many effects",
+            ));
         }
         let mut buffs = Vec::with_capacity(count);
         for _ in 0..count {
             let skill_id = r.read_u32::<LittleEndian>()?;
-            let level = r.read_u16::<LittleEndian>().map(|v| v as u32).or_else(|_| r.read_u32::<LittleEndian>()).unwrap_or(1);
+            let level = r
+                .read_u16::<LittleEndian>()
+                .map(|v| v as u32)
+                .or_else(|_| r.read_u32::<LittleEndian>())
+                .unwrap_or(1);
             let duration_secs = r.read_u32::<LittleEndian>().unwrap_or(0);
 
             buffs.push(BuffEffect {
@@ -1021,10 +1255,18 @@ impl L2Packet {
         Ok(MagicEffectIconsPacket { buffs })
     }
 
-    fn parse_abnormal_status_update(r: &mut Cursor<&[u8]>) -> Result<AbnormalStatusUpdatePacket, std::io::Error> {
-        let count = r.read_u16::<LittleEndian>().map(|c| c as usize).or_else(|_| r.read_u32::<LittleEndian>().map(|c| c as usize))?;
+    fn parse_abnormal_status_update(
+        r: &mut Cursor<&[u8]>,
+    ) -> Result<AbnormalStatusUpdatePacket, std::io::Error> {
+        let count = r
+            .read_u16::<LittleEndian>()
+            .map(|c| c as usize)
+            .or_else(|_| r.read_u32::<LittleEndian>().map(|c| c as usize))?;
         if count > 200 {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Too many abnormal effects"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Too many abnormal effects",
+            ));
         }
         let mut buffs = Vec::with_capacity(count);
         for _ in 0..count {
@@ -1046,7 +1288,10 @@ impl L2Packet {
         Ok(AbnormalStatusUpdatePacket { buffs })
     }
 
-    fn parse_private_store(r: &mut Cursor<&[u8]>, default_type: PrivateStoreType) -> Result<PrivateStorePacket, std::io::Error> {
+    fn parse_private_store(
+        r: &mut Cursor<&[u8]>,
+        default_type: PrivateStoreType,
+    ) -> Result<PrivateStorePacket, std::io::Error> {
         let seller_object_id = r.read_u32::<LittleEndian>()?;
         let raw_type = r.read_u32::<LittleEndian>().unwrap_or(0);
         let store_type = match raw_type {
@@ -1055,18 +1300,33 @@ impl L2Packet {
             8 => PrivateStoreType::PackageSell,
             _ => default_type,
         };
-        let _player_adena = r.read_u64::<LittleEndian>().or_else(|_| r.read_u32::<LittleEndian>().map(|v| v as u64)).unwrap_or_default();
+        let _player_adena = r
+            .read_u64::<LittleEndian>()
+            .or_else(|_| r.read_u32::<LittleEndian>().map(|v| v as u64))
+            .unwrap_or_default();
         let store_title = read_l2_string(r).unwrap_or_default();
-        let count = r.read_u32::<LittleEndian>().map(|c| c as usize).or_else(|_| r.read_u16::<LittleEndian>().map(|c| c as usize))?;
+        let count = r
+            .read_u32::<LittleEndian>()
+            .map(|c| c as usize)
+            .or_else(|_| r.read_u16::<LittleEndian>().map(|c| c as usize))?;
         if count > 500 {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Too many store items"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Too many store items",
+            ));
         }
         let mut items = Vec::with_capacity(count);
         for _ in 0..count {
             let item_object_id = r.read_u32::<LittleEndian>().unwrap_or(0);
             let item_id = r.read_u32::<LittleEndian>().unwrap_or(0);
-            let count = r.read_u64::<LittleEndian>().or_else(|_| r.read_u32::<LittleEndian>().map(|v| v as u64)).unwrap_or(1);
-            let price = r.read_u64::<LittleEndian>().or_else(|_| r.read_u32::<LittleEndian>().map(|v| v as u64)).unwrap_or(0);
+            let count = r
+                .read_u64::<LittleEndian>()
+                .or_else(|_| r.read_u32::<LittleEndian>().map(|v| v as u64))
+                .unwrap_or(1);
+            let price = r
+                .read_u64::<LittleEndian>()
+                .or_else(|_| r.read_u32::<LittleEndian>().map(|v| v as u64))
+                .unwrap_or(0);
             let enchant_level = r.read_u16::<LittleEndian>().unwrap_or(0);
 
             items.push(PrivateStoreItem {
@@ -1125,19 +1385,33 @@ impl L2Packet {
         }
     }
 
-    fn parse_commission_list(r: &mut Cursor<&[u8]>) -> Result<CommissionListPacket, std::io::Error> {
+    fn parse_commission_list(
+        r: &mut Cursor<&[u8]>,
+    ) -> Result<CommissionListPacket, std::io::Error> {
         let _list_type = r.read_u32::<LittleEndian>().unwrap_or(0);
         let count = r.read_u32::<LittleEndian>().map(|c| c as usize)?;
         if count > 500 {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Too many commission items"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Too many commission items",
+            ));
         }
         let mut items = Vec::with_capacity(count);
         for _ in 0..count {
-            let commission_id = r.read_u64::<LittleEndian>().or_else(|_| r.read_u32::<LittleEndian>().map(|v| v as u64)).unwrap_or(0);
+            let commission_id = r
+                .read_u64::<LittleEndian>()
+                .or_else(|_| r.read_u32::<LittleEndian>().map(|v| v as u64))
+                .unwrap_or(0);
             let item_object_id = r.read_u32::<LittleEndian>().unwrap_or(0);
             let item_id = r.read_u32::<LittleEndian>().unwrap_or(0);
-            let count = r.read_u64::<LittleEndian>().or_else(|_| r.read_u32::<LittleEndian>().map(|v| v as u64)).unwrap_or(1);
-            let price_per_unit = r.read_u64::<LittleEndian>().or_else(|_| r.read_u32::<LittleEndian>().map(|v| v as u64)).unwrap_or(0);
+            let count = r
+                .read_u64::<LittleEndian>()
+                .or_else(|_| r.read_u32::<LittleEndian>().map(|v| v as u64))
+                .unwrap_or(1);
+            let price_per_unit = r
+                .read_u64::<LittleEndian>()
+                .or_else(|_| r.read_u32::<LittleEndian>().map(|v| v as u64))
+                .unwrap_or(0);
             let total_price = price_per_unit.saturating_mul(count);
             let duration_days = r.read_u32::<LittleEndian>().unwrap_or(0);
             let end_time_epoch_sec = r.read_u32::<LittleEndian>().map(|v| v as u64).unwrap_or(0);
@@ -1160,20 +1434,34 @@ impl L2Packet {
         Ok(CommissionListPacket { items })
     }
 
-    fn parse_world_exchange_list(r: &mut Cursor<&[u8]>) -> Result<WorldExchangeListPacket, std::io::Error> {
+    fn parse_world_exchange_list(
+        r: &mut Cursor<&[u8]>,
+    ) -> Result<WorldExchangeListPacket, std::io::Error> {
         let count = r.read_u32::<LittleEndian>().map(|c| c as usize)?;
         if count > 500 {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Too many world exchange items"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Too many world exchange items",
+            ));
         }
         let mut items = Vec::with_capacity(count);
         for _ in 0..count {
-            let listing_id = r.read_u64::<LittleEndian>().or_else(|_| r.read_u32::<LittleEndian>().map(|v| v as u64)).unwrap_or(0);
+            let listing_id = r
+                .read_u64::<LittleEndian>()
+                .or_else(|_| r.read_u32::<LittleEndian>().map(|v| v as u64))
+                .unwrap_or(0);
             let item_id = r.read_u32::<LittleEndian>().unwrap_or(0);
-            let count = r.read_u64::<LittleEndian>().or_else(|_| r.read_u32::<LittleEndian>().map(|v| v as u64)).unwrap_or(1);
+            let count = r
+                .read_u64::<LittleEndian>()
+                .or_else(|_| r.read_u32::<LittleEndian>().map(|v| v as u64))
+                .unwrap_or(1);
             let price_adena = r.read_u64::<LittleEndian>().unwrap_or(0);
             let price_lcoin = r.read_u64::<LittleEndian>().unwrap_or(0);
             let enchant_level = r.read_u16::<LittleEndian>().unwrap_or(0);
-            let end_time_epoch_sec = r.read_u64::<LittleEndian>().or_else(|_| r.read_u32::<LittleEndian>().map(|v| v as u64)).unwrap_or(0);
+            let end_time_epoch_sec = r
+                .read_u64::<LittleEndian>()
+                .or_else(|_| r.read_u32::<LittleEndian>().map(|v| v as u64))
+                .unwrap_or(0);
             let seller_name = read_l2_string(r).unwrap_or_default();
 
             items.push(WorldExchangeItem {
@@ -1193,7 +1481,10 @@ impl L2Packet {
     fn parse_einhasad_store(r: &mut Cursor<&[u8]>) -> Result<EinhasadStorePacket, std::io::Error> {
         let count = r.read_u32::<LittleEndian>().map(|c| c as usize)?;
         if count > 500 {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Too many store products"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Too many store products",
+            ));
         }
         let mut products = Vec::with_capacity(count);
         for _ in 0..count {
@@ -1216,7 +1507,9 @@ impl L2Packet {
         Ok(EinhasadStorePacket { products })
     }
 
-    fn parse_move_to_location(r: &mut Cursor<&[u8]>) -> Result<MoveToLocationPacket, std::io::Error> {
+    fn parse_move_to_location(
+        r: &mut Cursor<&[u8]>,
+    ) -> Result<MoveToLocationPacket, std::io::Error> {
         let object_id = r.read_u32::<LittleEndian>()?;
         let target_x = r.read_i32::<LittleEndian>()?;
         let target_y = r.read_i32::<LittleEndian>()?;
@@ -1243,7 +1536,10 @@ pub fn read_l2_string(r: &mut Cursor<&[u8]>) -> Result<String, std::io::Error> {
     let mut count = 0;
     loop {
         if count > 1024 {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "String too long"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "String too long",
+            ));
         }
         match r.read_u16::<LittleEndian>() {
             Ok(0) => break,
@@ -1259,7 +1555,8 @@ pub fn read_l2_string(r: &mut Cursor<&[u8]>) -> Result<String, std::io::Error> {
             }
         }
     }
-    String::from_utf16(&u16_chars).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    String::from_utf16(&u16_chars)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
 }
 
 /// Reads an ASCII null-terminated string with length safeguard.
@@ -1268,7 +1565,10 @@ pub fn read_ascii_string(r: &mut Cursor<&[u8]>) -> Result<String, std::io::Error
     let mut count = 0;
     loop {
         if count > 1024 {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "String too long"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "String too long",
+            ));
         }
         match r.read_u8() {
             Ok(0) => break,
@@ -1340,7 +1640,7 @@ mod tests {
         let mut data = Vec::new();
         data.extend_from_slice(&(1u16).to_le_bytes()); // wh_type = 1 (Private)
         data.extend_from_slice(&(1u16).to_le_bytes()); // count = 1
-        // read_item_entry:
+                                                       // read_item_entry:
         data.extend_from_slice(&(0u16).to_le_bytes()); // item_type
         data.extend_from_slice(&(1001u32).to_le_bytes()); // object_id
         data.extend_from_slice(&(57u32).to_le_bytes()); // item_id = 57 (Adena)

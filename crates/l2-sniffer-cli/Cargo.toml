@@ -6,8 +6,9 @@ license.workspace = true
 authors.workspace = true
 
 [[bin]]
-name = "l2-sniffer"
+name = "l2-character-daemon"
 path = "src/main.rs"
+
 
 [dependencies]
 l2-sniffer-core.workspace = true

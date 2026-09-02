@@ -2,7 +2,10 @@ use std::fs;
 use std::path::Path;
 
 fn main() {
-    if std::env::var("TARGET").map(|t| t.contains("windows")).unwrap_or(false) {
+    if std::env::var("TARGET")
+        .map(|t| t.contains("windows"))
+        .unwrap_or(false)
+    {
         // Link delay-load helper so wpcap.dll is dynamically resolved at first call
         println!("cargo:rustc-link-lib=delayimp");
         println!("cargo:rustc-link-arg=/DELAYLOAD:wpcap.dll");

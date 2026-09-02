@@ -1,21 +1,22 @@
 //! Central state tracker for multi-client and multi-account sniffing sessions.
 
-use std::collections::HashMap;
-use std::net::SocketAddr;
-use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 use l2_sniffer_protocol::{
     AuthLoginPacket, CharSelectInfoPacket, CommissionListPacket, EinhasadStorePacket,
     InventoryUpdatePacket, ItemListPacket, L2Packet, PrivateStorePacket, SkillListPacket,
     UserInfoPacket, WarehouseListPacket, WorldExchangeListPacket,
 };
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::{broadcast, RwLock};
 use tracing::info;
 
 use crate::event::SnifferEvent;
 use crate::model::{
-    AccountSession, BuffEffect, CharSelectSlot, Character, CommissionItem, EinhasadProduct, InventoryItem,
-    Location, MarketState, PrivateStoreSession, SkillEntry, WarehouseType, WorldExchangeItem,
+    AccountSession, BuffEffect, CharSelectSlot, Character, CommissionItem, EinhasadProduct,
+    InventoryItem, Location, MarketState, PrivateStoreSession, SkillEntry, WarehouseType,
+    WorldExchangeItem,
 };
 
 /// Shared thread-safe tracker state across all client sessions and accounts.
@@ -76,7 +77,10 @@ impl CharacterTracker {
     /// Retrieve character by name.
     pub async fn get_character_by_name(&self, name: &str) -> Option<Character> {
         let chars = self.characters.read().await;
-        chars.values().find(|c| c.name.eq_ignore_ascii_case(name)).cloned()
+        chars
+            .values()
+            .find(|c| c.name.eq_ignore_ascii_case(name))
+            .cloned()
     }
 
     /// Retrieve snapshot of all detected account sessions with active characters resolved.
@@ -89,19 +93,28 @@ impl CharacterTracker {
         for acc in result.iter_mut() {
             if acc.active_character.is_none() {
                 // 1. Match active character by explicit account name
-                if let Some(c) = chars.values().find(|c| c.account_name.as_deref() == Some(&acc.account_name)) {
+                if let Some(c) = chars
+                    .values()
+                    .find(|c| c.account_name.as_deref() == Some(&acc.account_name))
+                {
                     acc.active_character = Some(c.name.clone());
                 }
                 // 2. Match active character by client IP endpoint
                 else if !acc.client_addr.is_empty() {
-                    if let Some(c) = chars.values().find(|c| c.client_addr.as_deref() == Some(&acc.client_addr)) {
+                    if let Some(c) = chars
+                        .values()
+                        .find(|c| c.client_addr.as_deref() == Some(&acc.client_addr))
+                    {
                         acc.active_character = Some(c.name.clone());
                     }
                 }
                 // 3. Match active character if any name/ID from the account's roster is in active characters
                 if acc.active_character.is_none() {
                     for slot in &acc.character_roster {
-                        if let Some(c) = chars.values().find(|c| c.name == slot.name || c.object_id == slot.char_id) {
+                        if let Some(c) = chars
+                            .values()
+                            .find(|c| c.name == slot.name || c.object_id == slot.char_id)
+                        {
                             acc.active_character = Some(c.name.clone());
                             break;
                         }
@@ -127,25 +140,37 @@ impl CharacterTracker {
     /// Retrieve character skills.
     pub async fn get_character_skills(&self, object_id: u32) -> Vec<SkillEntry> {
         let chars = self.characters.read().await;
-        chars.get(&object_id).map(|c| c.skills.clone()).unwrap_or_default()
+        chars
+            .get(&object_id)
+            .map(|c| c.skills.clone())
+            .unwrap_or_default()
     }
 
     /// Retrieve character buffs.
     pub async fn get_character_buffs(&self, object_id: u32) -> Vec<BuffEffect> {
         let chars = self.characters.read().await;
-        chars.get(&object_id).map(|c| c.buffs.clone()).unwrap_or_default()
+        chars
+            .get(&object_id)
+            .map(|c| c.buffs.clone())
+            .unwrap_or_default()
     }
 
     /// Retrieve character inventory.
     pub async fn get_character_inventory(&self, object_id: u32) -> Vec<InventoryItem> {
         let chars = self.characters.read().await;
-        chars.get(&object_id).map(|c| c.inventory.clone()).unwrap_or_default()
+        chars
+            .get(&object_id)
+            .map(|c| c.inventory.clone())
+            .unwrap_or_default()
     }
 
     /// Retrieve character warehouse items.
     pub async fn get_character_warehouse(&self, object_id: u32) -> Vec<InventoryItem> {
         let chars = self.characters.read().await;
-        chars.get(&object_id).map(|c| c.warehouse.clone()).unwrap_or_default()
+        chars
+            .get(&object_id)
+            .map(|c| c.warehouse.clone())
+            .unwrap_or_default()
     }
 
     /// Retrieve market state snapshot.
@@ -188,7 +213,11 @@ impl CharacterTracker {
     }
 
     /// Registers a new game client connection and emits an event.
-    pub async fn register_client_connection(&self, client_addr: SocketAddr, server_addr: SocketAddr) {
+    pub async fn register_client_connection(
+        &self,
+        client_addr: SocketAddr,
+        server_addr: SocketAddr,
+    ) {
         info!("Client connected: {} -> {}", client_addr, server_addr);
         let _ = self.event_tx.send(SnifferEvent::ClientConnected {
             client_addr,
@@ -216,7 +245,11 @@ impl CharacterTracker {
     }
 
     /// Ingest a parsed packet from a specific client TCP stream.
-    pub async fn handle_packet_with_client(&self, client_addr: Option<SocketAddr>, packet: L2Packet) {
+    pub async fn handle_packet_with_client(
+        &self,
+        client_addr: Option<SocketAddr>,
+        packet: L2Packet,
+    ) {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
@@ -233,7 +266,8 @@ impl CharacterTracker {
                 self.handle_user_info(client_addr, info, now).await;
             }
             L2Packet::StatusUpdate(update) => {
-                self.handle_status_update(client_addr, update.object_id, &update.attributes, now).await;
+                self.handle_status_update(client_addr, update.object_id, &update.attributes, now)
+                    .await;
             }
             L2Packet::ItemList(il) => {
                 self.handle_item_list(client_addr, il, now).await;
@@ -248,10 +282,12 @@ impl CharacterTracker {
                 self.handle_skill_list(client_addr, sl, now).await;
             }
             L2Packet::AbnormalStatusUpdate(ab) => {
-                self.handle_abnormal_status(client_addr, ab.buffs, now).await;
+                self.handle_abnormal_status(client_addr, ab.buffs, now)
+                    .await;
             }
             L2Packet::MagicEffectIcons(me) => {
-                self.handle_abnormal_status(client_addr, me.buffs, now).await;
+                self.handle_abnormal_status(client_addr, me.buffs, now)
+                    .await;
             }
             L2Packet::PrivateStore(ps) => {
                 self.handle_private_store(client_addr, ps, now).await;
@@ -266,7 +302,15 @@ impl CharacterTracker {
                 self.handle_einhasad_store(es, now).await;
             }
             L2Packet::MoveToLocation(mv) => {
-                self.handle_movement(client_addr, mv.object_id, mv.target_x, mv.target_y, mv.target_z, now).await;
+                self.handle_movement(
+                    client_addr,
+                    mv.object_id,
+                    mv.target_x,
+                    mv.target_y,
+                    mv.target_z,
+                    now,
+                )
+                .await;
             }
             L2Packet::Raw { opcode, payload } => {
                 let _ = self.event_tx.send(SnifferEvent::RawPacketReceived {
@@ -279,7 +323,12 @@ impl CharacterTracker {
         }
     }
 
-    async fn handle_auth_login(&self, client_addr: Option<SocketAddr>, auth: AuthLoginPacket, now: u64) {
+    async fn handle_auth_login(
+        &self,
+        client_addr: Option<SocketAddr>,
+        auth: AuthLoginPacket,
+        now: u64,
+    ) {
         if auth.account_name.is_empty() {
             return;
         }
@@ -293,13 +342,15 @@ impl CharacterTracker {
 
             let mut accs = self.accounts.write().await;
             let is_new_acc = !accs.contains_key(&auth.account_name);
-            let entry = accs.entry(auth.account_name.clone()).or_insert_with(|| AccountSession {
-                account_name: auth.account_name.clone(),
-                client_addr: addr.to_string(),
-                character_roster: Vec::new(),
-                active_character: None,
-                last_seen_epoch_ms: now,
-            });
+            let entry = accs
+                .entry(auth.account_name.clone())
+                .or_insert_with(|| AccountSession {
+                    account_name: auth.account_name.clone(),
+                    client_addr: addr.to_string(),
+                    character_roster: Vec::new(),
+                    active_character: None,
+                    last_seen_epoch_ms: now,
+                });
             entry.client_addr = addr.to_string();
             entry.last_seen_epoch_ms = now;
             is_new_acc
@@ -308,7 +359,10 @@ impl CharacterTracker {
         };
 
         if is_new {
-            info!("Account login detected: '{}' on {:?}", auth.account_name, client_addr);
+            info!(
+                "Account login detected: '{}' on {:?}",
+                auth.account_name, client_addr
+            );
             let _ = self.event_tx.send(SnifferEvent::AccountDetected {
                 client_addr,
                 account_name: auth.account_name,
@@ -316,7 +370,12 @@ impl CharacterTracker {
         }
     }
 
-    async fn handle_char_select_info(&self, client_addr: Option<SocketAddr>, info: CharSelectInfoPacket, now: u64) {
+    async fn handle_char_select_info(
+        &self,
+        client_addr: Option<SocketAddr>,
+        info: CharSelectInfoPacket,
+        now: u64,
+    ) {
         if info.character_slots.is_empty() {
             return;
         }
@@ -325,7 +384,10 @@ impl CharacterTracker {
             info.account_name.clone()
         } else if let Some(addr) = client_addr {
             let c_to_a = self.client_to_account.read().await;
-            c_to_a.get(&addr).cloned().unwrap_or_else(|| "GameAccount".into())
+            c_to_a
+                .get(&addr)
+                .cloned()
+                .unwrap_or_else(|| "GameAccount".into())
         } else {
             "GameAccount".into()
         };
@@ -338,19 +400,26 @@ impl CharacterTracker {
         }
 
         let mut accs = self.accounts.write().await;
-        let entry = accs.entry(account_name.clone()).or_insert_with(|| AccountSession {
-            account_name: account_name.clone(),
-            client_addr: client_addr.map(|a| a.to_string()).unwrap_or_default(),
-            character_roster: Vec::new(),
-            active_character: None,
-            last_seen_epoch_ms: now,
-        });
+        let entry = accs
+            .entry(account_name.clone())
+            .or_insert_with(|| AccountSession {
+                account_name: account_name.clone(),
+                client_addr: client_addr.map(|a| a.to_string()).unwrap_or_default(),
+                character_roster: Vec::new(),
+                active_character: None,
+                last_seen_epoch_ms: now,
+            });
 
-        let roster: Vec<CharSelectSlot> = info.character_slots.into_iter().map(Into::into).collect();
+        let roster: Vec<CharSelectSlot> =
+            info.character_slots.into_iter().map(Into::into).collect();
         entry.character_roster = roster.clone();
         entry.last_seen_epoch_ms = now;
 
-        info!("Loaded roster for account '{}': {} characters", account_name, roster.len());
+        info!(
+            "Loaded roster for account '{}': {} characters",
+            account_name,
+            roster.len()
+        );
 
         let _ = self.event_tx.send(SnifferEvent::AccountRosterLoaded {
             client_addr,
@@ -359,7 +428,12 @@ impl CharacterTracker {
         });
     }
 
-    async fn handle_user_info(&self, client_addr: Option<SocketAddr>, info: UserInfoPacket, now: u64) {
+    async fn handle_user_info(
+        &self,
+        client_addr: Option<SocketAddr>,
+        info: UserInfoPacket,
+        now: u64,
+    ) {
         if info.name.is_empty() || info.level == 0 || info.level > 130 || info.object_id == 0 {
             return;
         }
@@ -385,14 +459,24 @@ impl CharacterTracker {
             None
         };
 
-        let char_entry = chars.entry(info.object_id).or_insert_with(Character::default);
+        let char_entry = chars
+            .entry(info.object_id)
+            .or_insert_with(Character::default);
         char_entry.object_id = info.object_id;
         char_entry.account_name = account_name.clone();
         char_entry.name = info.name.clone();
-        if info.class_id > 0 { char_entry.class_id = info.class_id; }
-        if info.level > 0 { char_entry.level = info.level; }
-        if info.exp > 0 { char_entry.exp = info.exp; }
-        if info.sp > 0 { char_entry.sp = info.sp; }
+        if info.class_id > 0 {
+            char_entry.class_id = info.class_id;
+        }
+        if info.level > 0 {
+            char_entry.level = info.level;
+        }
+        if info.exp > 0 {
+            char_entry.exp = info.exp;
+        }
+        if info.sp > 0 {
+            char_entry.sp = info.sp;
+        }
         char_entry.client_addr = client_addr.map(|a| a.to_string());
         char_entry.location = Location {
             x: info.x,
@@ -400,10 +484,18 @@ impl CharacterTracker {
             z: info.z,
             heading: info.heading,
         };
-        if info.cur_hp > 0 { char_entry.vitals.cur_hp = info.cur_hp; }
-        if info.max_hp > 0 { char_entry.vitals.max_hp = info.max_hp; }
-        if info.cur_mp > 0 { char_entry.vitals.cur_mp = info.cur_mp; }
-        if info.max_mp > 0 { char_entry.vitals.max_mp = info.max_mp; }
+        if info.cur_hp > 0 {
+            char_entry.vitals.cur_hp = info.cur_hp;
+        }
+        if info.max_hp > 0 {
+            char_entry.vitals.max_hp = info.max_hp;
+        }
+        if info.cur_mp > 0 {
+            char_entry.vitals.cur_mp = info.cur_mp;
+        }
+        if info.max_mp > 0 {
+            char_entry.vitals.max_mp = info.max_mp;
+        }
         char_entry.last_updated_epoch_ms = now;
 
         *active = Some(info.object_id);
@@ -412,19 +504,24 @@ impl CharacterTracker {
         {
             let mut accs = self.accounts.write().await;
             if let Some(ref acc_name) = account_name {
-                let entry = accs.entry(acc_name.clone()).or_insert_with(|| AccountSession {
-                    account_name: acc_name.clone(),
-                    client_addr: client_addr.map(|a| a.to_string()).unwrap_or_default(),
-                    character_roster: Vec::new(),
-                    active_character: Some(info.name.clone()),
-                    last_seen_epoch_ms: now,
-                });
+                let entry = accs
+                    .entry(acc_name.clone())
+                    .or_insert_with(|| AccountSession {
+                        account_name: acc_name.clone(),
+                        client_addr: client_addr.map(|a| a.to_string()).unwrap_or_default(),
+                        character_roster: Vec::new(),
+                        active_character: Some(info.name.clone()),
+                        last_seen_epoch_ms: now,
+                    });
                 entry.active_character = Some(info.name.clone());
                 entry.last_seen_epoch_ms = now;
             } else if let Some(addr) = client_addr {
                 for entry in accs.values_mut() {
                     if entry.client_addr == addr.to_string()
-                        || entry.character_roster.iter().any(|c| c.name == info.name || c.char_id == info.object_id)
+                        || entry
+                            .character_roster
+                            .iter()
+                            .any(|c| c.name == info.name || c.char_id == info.object_id)
                     {
                         entry.active_character = Some(info.name.clone());
                         entry.last_seen_epoch_ms = now;
@@ -433,8 +530,14 @@ impl CharacterTracker {
             }
         }
 
-        info!("Updated player character: {} (ID: {}, Level: {}, HP: {}/{})",
-            info.name, info.object_id, char_entry.level, char_entry.vitals.cur_hp, char_entry.vitals.max_hp);
+        info!(
+            "Updated player character: {} (ID: {}, Level: {}, HP: {}/{})",
+            info.name,
+            info.object_id,
+            char_entry.level,
+            char_entry.vitals.cur_hp,
+            char_entry.vitals.max_hp
+        );
 
         let _ = self.event_tx.send(SnifferEvent::CharacterLoaded {
             client_addr,
@@ -485,7 +588,12 @@ impl CharacterTracker {
         }
     }
 
-    async fn handle_item_list(&self, client_addr: Option<SocketAddr>, il: ItemListPacket, now: u64) {
+    async fn handle_item_list(
+        &self,
+        client_addr: Option<SocketAddr>,
+        il: ItemListPacket,
+        now: u64,
+    ) {
         let domain_items: Vec<InventoryItem> = il.items.into_iter().map(Into::into).collect();
         let object_id = self.resolve_client_object_id(client_addr).await;
         if let Some(obj_id) = object_id {
@@ -508,7 +616,12 @@ impl CharacterTracker {
         }
     }
 
-    async fn handle_inventory_update(&self, client_addr: Option<SocketAddr>, iu: InventoryUpdatePacket, now: u64) {
+    async fn handle_inventory_update(
+        &self,
+        client_addr: Option<SocketAddr>,
+        iu: InventoryUpdatePacket,
+        now: u64,
+    ) {
         if iu.items.is_empty() {
             return;
         }
@@ -518,7 +631,11 @@ impl CharacterTracker {
             let mut chars = self.characters.write().await;
             if let Some(c) = chars.get_mut(&obj_id) {
                 for updated in &domain_items {
-                    if let Some(pos) = c.inventory.iter().position(|i| i.object_id == updated.object_id) {
+                    if let Some(pos) = c
+                        .inventory
+                        .iter()
+                        .position(|i| i.object_id == updated.object_id)
+                    {
                         c.inventory[pos] = updated.clone();
                     } else {
                         c.inventory.push(updated.clone());
@@ -534,10 +651,18 @@ impl CharacterTracker {
         }
     }
 
-    async fn handle_warehouse_list(&self, client_addr: Option<SocketAddr>, wh: WarehouseListPacket, now: u64) {
+    async fn handle_warehouse_list(
+        &self,
+        client_addr: Option<SocketAddr>,
+        wh: WarehouseListPacket,
+        now: u64,
+    ) {
         let domain_items: Vec<InventoryItem> = wh.items.into_iter().map(Into::into).collect();
         let wh_type: WarehouseType = wh.wh_type.into();
-        let object_id = self.resolve_client_object_id(client_addr).await.unwrap_or(0);
+        let object_id = self
+            .resolve_client_object_id(client_addr)
+            .await
+            .unwrap_or(0);
         let mut chars = self.characters.write().await;
         if let Some(c) = chars.get_mut(&object_id) {
             c.warehouse = domain_items.clone();
@@ -552,7 +677,12 @@ impl CharacterTracker {
         });
     }
 
-    async fn handle_skill_list(&self, client_addr: Option<SocketAddr>, sl: SkillListPacket, now: u64) {
+    async fn handle_skill_list(
+        &self,
+        client_addr: Option<SocketAddr>,
+        sl: SkillListPacket,
+        now: u64,
+    ) {
         if sl.skills.is_empty() {
             return;
         }
@@ -575,7 +705,12 @@ impl CharacterTracker {
         }
     }
 
-    async fn handle_abnormal_status(&self, client_addr: Option<SocketAddr>, buffs: Vec<l2_sniffer_protocol::BuffEffect>, now: u64) {
+    async fn handle_abnormal_status(
+        &self,
+        client_addr: Option<SocketAddr>,
+        buffs: Vec<l2_sniffer_protocol::BuffEffect>,
+        now: u64,
+    ) {
         let domain_buffs: Vec<BuffEffect> = buffs.into_iter().map(Into::into).collect();
         let object_id = self.resolve_client_object_id(client_addr).await;
         if let Some(obj_id) = object_id {
@@ -595,7 +730,12 @@ impl CharacterTracker {
         }
     }
 
-    async fn handle_private_store(&self, client_addr: Option<SocketAddr>, ps: PrivateStorePacket, now: u64) {
+    async fn handle_private_store(
+        &self,
+        client_addr: Option<SocketAddr>,
+        ps: PrivateStorePacket,
+        now: u64,
+    ) {
         let seller_name = {
             let chars = self.characters.read().await;
             chars.get(&ps.seller_object_id).map(|c| c.name.clone())
@@ -623,27 +763,27 @@ impl CharacterTracker {
         let items: Vec<CommissionItem> = cl.items.into_iter().map(Into::into).collect();
         let mut comm = self.commission_items.write().await;
         *comm = items.clone();
-        let _ = self.event_tx.send(SnifferEvent::CommissionMarketUpdated {
-            items,
-        });
+        let _ = self
+            .event_tx
+            .send(SnifferEvent::CommissionMarketUpdated { items });
     }
 
     async fn handle_world_exchange_list(&self, we: WorldExchangeListPacket, _now: u64) {
         let items: Vec<WorldExchangeItem> = we.items.into_iter().map(Into::into).collect();
         let mut ex = self.world_exchange_items.write().await;
         *ex = items.clone();
-        let _ = self.event_tx.send(SnifferEvent::WorldExchangeUpdated {
-            items,
-        });
+        let _ = self
+            .event_tx
+            .send(SnifferEvent::WorldExchangeUpdated { items });
     }
 
     async fn handle_einhasad_store(&self, es: EinhasadStorePacket, _now: u64) {
         let products: Vec<EinhasadProduct> = es.products.into_iter().map(Into::into).collect();
         let mut ein = self.einhasad_products.write().await;
         *ein = products.clone();
-        let _ = self.event_tx.send(SnifferEvent::EinhasadStoreUpdated {
-            products,
-        });
+        let _ = self
+            .event_tx
+            .send(SnifferEvent::EinhasadStoreUpdated { products });
     }
 
     async fn handle_movement(
@@ -694,7 +834,9 @@ impl CharacterTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use l2_sniffer_protocol::{AuthLoginPacket, CharSelectSlot, ItemInfo, SkillEntry, UserInfoPacket};
+    use l2_sniffer_protocol::{
+        AuthLoginPacket, CharSelectSlot, ItemInfo, SkillEntry, UserInfoPacket,
+    };
 
     #[tokio::test]
     async fn test_multi_client_and_account_tracker() {
@@ -709,7 +851,9 @@ mod tests {
             session_key1: 12345,
             session_key2: 67890,
         };
-        tracker.handle_packet_with_client(Some(client1), L2Packet::AuthLogin(auth)).await;
+        tracker
+            .handle_packet_with_client(Some(client1), L2Packet::AuthLogin(auth))
+            .await;
 
         let ev1 = rx.recv().await.unwrap();
         assert!(matches!(ev1, SnifferEvent::AccountDetected { .. }));
@@ -728,7 +872,9 @@ mod tests {
             account_name: "JasonAccount1".to_string(),
             character_slots: vec![slot],
         };
-        tracker.handle_packet_with_client(Some(client1), L2Packet::CharSelectInfo(select_info)).await;
+        tracker
+            .handle_packet_with_client(Some(client1), L2Packet::CharSelectInfo(select_info))
+            .await;
 
         let ev2 = rx.recv().await.unwrap();
         assert!(matches!(ev2, SnifferEvent::AccountRosterLoaded { .. }));
@@ -742,7 +888,9 @@ mod tests {
             max_hp: 6000,
             ..Default::default()
         };
-        tracker.handle_packet_with_client(Some(client1), L2Packet::UserInfo(char1)).await;
+        tracker
+            .handle_packet_with_client(Some(client1), L2Packet::UserInfo(char1))
+            .await;
 
         let c = tracker.get_character_by_client(&client1).await.unwrap();
         assert_eq!(c.name, "HeroKnight");
@@ -759,7 +907,9 @@ mod tests {
                 enchant_type: 0,
             }],
         };
-        tracker.handle_packet_with_client(Some(client1), L2Packet::SkillList(sl)).await;
+        tracker
+            .handle_packet_with_client(Some(client1), L2Packet::SkillList(sl))
+            .await;
         let skills = tracker.get_character_skills(1001).await;
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].skill_id, 1069);
@@ -774,7 +924,9 @@ mod tests {
                 ..Default::default()
             }],
         };
-        tracker.handle_packet_with_client(Some(client1), L2Packet::ItemList(il)).await;
+        tracker
+            .handle_packet_with_client(Some(client1), L2Packet::ItemList(il))
+            .await;
         let inv = tracker.get_character_inventory(1001).await;
         assert_eq!(inv.len(), 1);
         assert_eq!(inv[0].item_id, 57);

@@ -1,8 +1,8 @@
 //! GraphQL Schema, QueryRoot, and SubscriptionRoot implementation.
 
-use std::sync::Arc;
 use async_graphql::{Context, EmptyMutation, Object, Schema, Subscription};
 use futures_util::Stream;
+use std::sync::Arc;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
 

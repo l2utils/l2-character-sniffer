@@ -51,7 +51,7 @@ cargo check --workspace --all-targets
 cargo build --workspace
 
 # Build optimized release binary
-cargo build --release --bin l2-sniffer
+cargo build --release --bin l2-character-daemon
 ```
 
 ### Testing

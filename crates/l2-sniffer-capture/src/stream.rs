@@ -1,13 +1,13 @@
 //! Packet capture engine with multi-client TCP stream demuxing and dynamic decryption.
 
-use std::collections::HashMap;
-use std::fs::File;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use bytes::BytesMut;
 use l2_sniffer_protocol::{L2Cryptor, L2FrameCodec, L2Packet};
 use pcap::Capture;
-use pcap_file::pcapng::PcapNgReader;
 use pcap_file::pcap::PcapReader;
+use pcap_file::pcapng::PcapNgReader;
+use std::collections::HashMap;
+use std::fs::File;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
@@ -82,11 +82,7 @@ impl ClientStream {
         }
     }
 
-    pub fn ingest_server_payload(
-        &mut self,
-        payload: &[u8],
-        tx: &mpsc::Sender<SessionMessage>,
-    ) {
+    pub fn ingest_server_payload(&mut self, payload: &[u8], tx: &mpsc::Sender<SessionMessage>) {
         self.rx_buffer.extend_from_slice(payload);
 
         while let Ok(Some(mut frame)) = self.rx_codec.decode(&mut self.rx_buffer) {
@@ -103,7 +99,10 @@ impl ClientStream {
                             let key_seed = &frame[2..10];
                             self.in_cryptor.set_key(key_seed);
                             self.out_cryptor.set_key(key_seed);
-                            info!("Captured Lineage 2 encryption key for client {}: {:02X?}", self.client_addr, key_seed);
+                            info!(
+                                "Captured Lineage 2 encryption key for client {}: {:02X?}",
+                                self.client_addr, key_seed
+                            );
                         }
                     }
                     let parsed = L2Packet::parse(opcode, &frame[1..]);
@@ -133,11 +132,7 @@ impl ClientStream {
         }
     }
 
-    pub fn ingest_client_payload(
-        &mut self,
-        payload: &[u8],
-        tx: &mpsc::Sender<SessionMessage>,
-    ) {
+    pub fn ingest_client_payload(&mut self, payload: &[u8], tx: &mpsc::Sender<SessionMessage>) {
         self.tx_buffer.extend_from_slice(payload);
 
         while let Ok(Some(mut frame)) = self.tx_codec.decode(&mut self.tx_buffer) {
@@ -222,20 +217,27 @@ impl SnifferBuilder {
         }
 
         let selected_interface = match self.device_name {
-            Some(ref query) => crate::device::find_device(query)?
-                .ok_or_else(|| CaptureError::InterfaceNotFound(format!("Network interface '{query}' not found")))?
-            ,
-            None => crate::device::default_device()?
-                .ok_or_else(|| CaptureError::InterfaceNotFound("No active network device found".into()))?,
+            Some(ref query) => crate::device::find_device(query)?.ok_or_else(|| {
+                CaptureError::InterfaceNotFound(format!("Network interface '{query}' not found"))
+            })?,
+            None => crate::device::default_device()?.ok_or_else(|| {
+                CaptureError::InterfaceNotFound("No active network device found".into())
+            })?,
         };
 
-        let dev_desc = selected_interface.description.as_deref().unwrap_or("Network Adapter");
+        let dev_desc = selected_interface
+            .description
+            .as_deref()
+            .unwrap_or("Network Adapter");
         let dev_ips = if selected_interface.addresses.is_empty() {
             String::new()
         } else {
             format!(" ({})", selected_interface.addresses.join(", "))
         };
-        info!("Opening capture on device: {} [{}{}]", selected_interface.name, dev_desc, dev_ips);
+        info!(
+            "Opening capture on device: {} [{}{}]",
+            selected_interface.name, dev_desc, dev_ips
+        );
 
         let cap: Capture<pcap::Active> = Capture::from_device(selected_interface.name.as_str())?
             .promisc(self.promiscuous)
@@ -291,13 +293,21 @@ impl SnifferSession {
             let mut streams: HashMap<SocketAddr, ClientStream> = HashMap::new();
 
             match &mut self {
-                SnifferSession::Live { cap, device_info, filter, game_ports } => {
+                SnifferSession::Live {
+                    cap,
+                    device_info,
+                    filter,
+                    game_ports,
+                } => {
                     if let Err(e) = cap.filter(filter, true) {
                         warn!("Failed to apply BPF filter '{filter}': {e}");
                     }
                     let desc = device_info.description.as_deref().unwrap_or("Adapter");
                     let ips = device_info.addresses.join(", ");
-                    info!("Sniffer live capture started on {} [{}] (IPs: {})", device_info.name, desc, ips);
+                    info!(
+                        "Sniffer live capture started on {} [{}] (IPs: {})",
+                        device_info.name, desc, ips
+                    );
 
                     loop {
                         match cap.next_packet() {
@@ -320,7 +330,10 @@ impl SnifferSession {
                     }
                 }
             }
-            info!("Sniffer capture worker finished (tracked {} active client streams)", streams.len());
+            info!(
+                "Sniffer capture worker finished (tracked {} active client streams)",
+                streams.len()
+            );
         })
     }
 
@@ -357,7 +370,9 @@ impl SnifferSession {
             return Ok(());
         }
 
-        Err(CaptureError::PcapFile("Unsupported pcap/pcapng format".into()))
+        Err(CaptureError::PcapFile(
+            "Unsupported pcap/pcapng format".into(),
+        ))
     }
 
     /// Extracts IPv4/TCP headers, detects SYN/FIN/RST connection lifecycle, and routes payloads.
@@ -388,8 +403,18 @@ impl SnifferSession {
             return; // Not TCP IPv4
         }
 
-        let src_ip = IpAddr::V4(Ipv4Addr::new(ip_header[12], ip_header[13], ip_header[14], ip_header[15]));
-        let dst_ip = IpAddr::V4(Ipv4Addr::new(ip_header[16], ip_header[17], ip_header[18], ip_header[19]));
+        let src_ip = IpAddr::V4(Ipv4Addr::new(
+            ip_header[12],
+            ip_header[13],
+            ip_header[14],
+            ip_header[15],
+        ));
+        let dst_ip = IpAddr::V4(Ipv4Addr::new(
+            ip_header[16],
+            ip_header[17],
+            ip_header[18],
+            ip_header[19],
+        ));
 
         // TCP Header
         let tcp_header = &raw[14 + ip_ihl..];
@@ -464,10 +489,7 @@ mod tests {
         } else {
             "../../captures/l2-login-single.pcapng"
         };
-        let session = SnifferBuilder::new()
-            .pcap_file(path)
-            .build()
-            .unwrap();
+        let session = SnifferBuilder::new().pcap_file(path).build().unwrap();
 
         let handle = session.spawn_worker(tx);
         while let Some(msg) = rx.recv().await {
@@ -477,14 +499,27 @@ mod tests {
                         println!("\n=== [TEST] AuthLogin: Acc='{}' ===", a.account_name);
                     }
                     L2Packet::CharSelectInfo(ref cs) => {
-                        println!("\n=== [TEST] CharSelectInfo: Acc='{}' ({} slots) ===", cs.account_name, cs.character_slots.len());
+                        println!(
+                            "\n=== [TEST] CharSelectInfo: Acc='{}' ({} slots) ===",
+                            cs.account_name,
+                            cs.character_slots.len()
+                        );
                         for (i, s) in cs.character_slots.iter().enumerate() {
-                            println!("  Slot {}: Name='{}', Lvl={}, Class={}, HP={:.0}", i+1, s.name, s.level, s.class_id, s.cur_hp);
+                            println!(
+                                "  Slot {}: Name='{}', Lvl={}, Class={}, HP={:.0}",
+                                i + 1,
+                                s.name,
+                                s.level,
+                                s.class_id,
+                                s.cur_hp
+                            );
                         }
                     }
                     L2Packet::UserInfo(ref u) => {
-                        println!("\n=== [TEST] UserInfo: Name='{}', Lvl={}, Class={}, HP={}/{} ===",
-                            u.name, u.level, u.class_id, u.cur_hp, u.max_hp);
+                        println!(
+                            "\n=== [TEST] UserInfo: Name='{}', Lvl={}, Class={}, HP={}/{} ===",
+                            u.name, u.level, u.class_id, u.cur_hp, u.max_hp
+                        );
                     }
                     _ => {}
                 }
@@ -493,4 +528,3 @@ mod tests {
         let _ = handle.await;
     }
 }
-
