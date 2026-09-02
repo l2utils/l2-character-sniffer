@@ -241,11 +241,15 @@ impl CharacterTracker {
             return;
         }
 
-        if let Some(addr) = client_addr {
+        let is_new = if let Some(addr) = client_addr {
             let mut c_to_a = self.client_to_account.write().await;
+            if c_to_a.get(&addr) == Some(&auth.account_name) {
+                return; // Already registered to this endpoint
+            }
             c_to_a.insert(addr, auth.account_name.clone());
 
             let mut accs = self.accounts.write().await;
+            let is_new_acc = !accs.contains_key(&auth.account_name);
             let entry = accs.entry(auth.account_name.clone()).or_insert_with(|| AccountSession {
                 account_name: auth.account_name.clone(),
                 client_addr: addr.to_string(),
@@ -255,14 +259,18 @@ impl CharacterTracker {
             });
             entry.client_addr = addr.to_string();
             entry.last_seen_epoch_ms = now;
+            is_new_acc
+        } else {
+            true
+        };
+
+        if is_new {
+            info!("Account login detected: '{}' on {:?}", auth.account_name, client_addr);
+            let _ = self.event_tx.send(CompanionEvent::AccountDetected {
+                client_addr,
+                account_name: auth.account_name,
+            });
         }
-
-        info!("Account login detected: '{}' on {:?}", auth.account_name, client_addr);
-
-        let _ = self.event_tx.send(CompanionEvent::AccountDetected {
-            client_addr,
-            account_name: auth.account_name,
-        });
     }
 
     async fn handle_char_select_info(&self, client_addr: Option<SocketAddr>, info: CharSelectInfoPacket, now: u64) {

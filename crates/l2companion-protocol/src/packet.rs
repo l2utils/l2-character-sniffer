@@ -516,20 +516,16 @@ impl L2Packet {
             0xd0 => {
                 // Client Extended Opcode 0xD0
                 if payload.len() >= 2 {
-                    let mut sub_cursor = Cursor::new(&payload[2..]);
-                    if let Ok(auth) = Self::parse_auth_login(&mut sub_cursor) {
-                        return L2Packet::AuthLogin(auth);
+                    let sub_op = u16::from_le_bytes([payload[0], payload[1]]);
+                    if sub_op == 0x0240 || sub_op == 0x0008 || sub_op == 0x002b || sub_op == 0x0001 {
+                        let mut sub_cursor = Cursor::new(&payload[2..]);
+                        if let Ok(auth) = Self::parse_auth_login(&mut sub_cursor) {
+                            return L2Packet::AuthLogin(auth);
+                        }
                     }
                 }
             }
-            _ => {
-                // Fallback attempt for any client packet that might contain auth credentials
-                if payload.len() >= 8 {
-                    if let Ok(auth) = Self::parse_auth_login(&mut cursor) {
-                        return L2Packet::AuthLogin(auth);
-                    }
-                }
-            }
+            _ => {}
         }
         L2Packet::Raw {
             opcode,
@@ -601,7 +597,7 @@ impl L2Packet {
         // 2. Try reading retail format (session_key1: u32, token_len: u16, raw_name, session_key2: u32)
         let mut retail_r = Cursor::new(slice);
         let session_key1 = retail_r.read_u32::<LittleEndian>().unwrap_or_default();
-        let _token_len = retail_r.read_u16::<LittleEndian>().unwrap_or_default();
+        let token_len = retail_r.read_u16::<LittleEndian>().unwrap_or_default();
         let raw_name = if let Ok(s) = read_ascii_string(&mut retail_r) {
             s
         } else {
@@ -617,7 +613,7 @@ impl L2Packet {
             });
         }
 
-        if session_key1 > 0 {
+        if session_key1 > 0 && token_len > 0 && token_len <= 1024 {
             return Ok(AuthLoginPacket {
                 account_name: format!("#{session_key1}"),
                 session_key1,
