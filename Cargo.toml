@@ -42,6 +42,7 @@ byteorder = "1.5"
 # Cryptography & Utils
 blowfish = "0.9"
 cipher = "0.4"
+obfstr = "0.4"
 
 # Error handling & CLI
 thiserror = "2.0"
@@ -50,11 +51,14 @@ clap = { version = "4.5", features = ["derive"] }
 inquire = "0.7"
 
 # Logging & Diagnostics
-tracing = "0.1"
+tracing = { version = "0.1", features = ["release_max_level_warn"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [profile.release]
 opt-level = 3
-lto = true
+lto = "fat"
 codegen-units = 1
-panic = "unwind"
+panic = "abort"
+strip = true
+overflow-checks = false
+

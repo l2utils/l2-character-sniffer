@@ -12,13 +12,11 @@ use l2_sniffer_core::{start_api_server, CharacterTracker, SnifferEvent};
 use tokio::sync::mpsc;
 
 #[derive(Parser, Debug)]
-#[command(name = "l2-sniffer", version, about = "Lineage 2 Character Data Sniffer & Telemetry Server CLI")]
+#[command(name = "agent", version)]
 struct Cli {
-    /// Enable debug mode (activates interactive GraphiQL browser UI)
     #[arg(long, global = true)]
     debug: bool,
 
-    /// Show virtual and WAN miniport network interfaces (hidden by default)
     #[arg(long, global = true)]
     show_virtual_nic: bool,
 
@@ -28,55 +26,41 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// List all network interfaces available for packet capture
     Devices,
-    /// Start sniffing network packets (live or offline pcap) and display character updates
     Sniff {
-        /// Network interface name to capture on (default: auto-detect)
         #[arg(short, long)]
         device: Option<String>,
 
-        /// Read from offline pcap/pcapng file instead of live interface
         #[arg(short, long)]
         pcap: Option<String>,
 
-        /// Custom BPF filter (default: "tcp port 7777 or tcp port 2106")
         #[arg(short, long)]
         filter: Option<String>,
 
-        /// Port to start the REST and WebSocket telemetry API server on (e.g. 3000)
         #[arg(long)]
         port: Option<u16>,
     },
-    /// Replay and analyze an offline pcap/pcapng capture file
     Analyze {
-        /// Path to the .pcap or .pcapng file
-        #[arg(default_value = "captures/l2-multi-client.pcapng")]
         path: String,
 
-        /// Port to start the REST and WebSocket telemetry API server on (e.g. 3000)
         #[arg(long)]
         port: Option<u16>,
     },
-    /// Run as a persistent background capture & REST/WebSocket API server daemon
     Serve {
-        /// Port to run the telemetry API server on
         #[arg(long, default_value_t = 3000)]
         port: u16,
 
-        /// Network interface name to capture on (default: auto-detect)
         #[arg(short, long)]
         device: Option<String>,
 
-        /// Read from offline pcap/pcapng file
         #[arg(short, long)]
         pcap: Option<String>,
 
-        /// Custom BPF filter
         #[arg(short, long)]
         filter: Option<String>,
     },
 }
+
 
 fn init_windows_dll_path() {
     #[cfg(target_os = "windows")]
@@ -85,7 +69,7 @@ fn init_windows_dll_path() {
         extern "system" {
             fn SetDllDirectoryA(lpPathName: *const u8) -> i32;
         }
-        let npcap_path = b"C:\\Windows\\System32\\Npcap\0";
+        let npcap_path = obfstr::obfbytes!(b"C:\\Windows\\System32\\Npcap\0");
         SetDllDirectoryA(npcap_path.as_ptr());
     }
 }
@@ -147,13 +131,14 @@ async fn main() -> Result<()> {
             pcap,
             filter,
         } => {
-            println!("Starting Lineage 2 Telemetry Daemon & Web Service on port {port}...");
+            println!("{} {port}...", obfstr::obfstr!("Starting Telemetry Daemon & Web Service on port"));
             run_capture_session(device, pcap, filter, Some(port), cli.debug, cli.show_virtual_nic).await?;
         }
     }
 
     Ok(())
 }
+
 
 #[derive(Clone)]
 struct DeviceOption {
@@ -273,7 +258,7 @@ async fn run_capture_session(
         builder = builder.filter(f);
     }
 
-    println!("\nInitializing Lineage 2 Sniffer...");
+    println!("{}", obfstr::obfstr!("\nInitializing Sniffer..."));
     let session = builder.build()?;
     println!("📡 Capture Source: {}", session.source_description());
 

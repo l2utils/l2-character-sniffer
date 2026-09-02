@@ -179,7 +179,7 @@ impl Default for SnifferBuilder {
             device_name: None,
             pcap_file: None,
             // Game server (7777) and login server (2106)
-            bpf_filter: "tcp port 7777 or tcp port 2106".to_string(),
+            bpf_filter: obfstr::obfstr!("tcp port 7777 or tcp port 2106").to_string(),
             snaplen: 65535,
             promiscuous: true,
             timeout_ms: 1000,

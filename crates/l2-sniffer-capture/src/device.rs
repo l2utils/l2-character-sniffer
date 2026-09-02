@@ -1,4 +1,5 @@
 use std::time::{Duration, Instant};
+use obfstr::obfstr;
 use pcap::{Capture, Device};
 use serde::{Deserialize, Serialize};
 
@@ -15,48 +16,45 @@ pub struct NetworkInterface {
 fn is_virtual_adapter(desc: &str, name: &str) -> bool {
     let lower_desc = desc.to_lowercase();
     let lower_name = name.to_lowercase();
-    let virtual_keywords = [
-        "wan miniport",
-        "hyper-v",
-        "virtual",
-        "loopback",
-        "npcap loopback",
-        "tap-windows",
-        "vmware",
-        "virtualbox",
-        "vbox",
-        "wsl",
-        "bluetooth",
-        "tunnel",
-        "teredo",
-        "isatap",
-    ];
-    virtual_keywords.iter().any(|&k| lower_desc.contains(k) || lower_name.contains(k))
+    let match_k = |k: &str| lower_desc.contains(k) || lower_name.contains(k);
+
+    match_k(obfstr!("wan miniport"))
+        || match_k(obfstr!("hyper-v"))
+        || match_k(obfstr!("virtual"))
+        || match_k(obfstr!("loopback"))
+        || match_k(obfstr!("npcap loopback"))
+        || match_k(obfstr!("tap-windows"))
+        || match_k(obfstr!("vmware"))
+        || match_k(obfstr!("virtualbox"))
+        || match_k(obfstr!("vbox"))
+        || match_k(obfstr!("wsl"))
+        || match_k(obfstr!("bluetooth"))
+        || match_k(obfstr!("tunnel"))
+        || match_k(obfstr!("teredo"))
+        || match_k(obfstr!("isatap"))
 }
 
 /// Helper to test if a description represents a physical NIC (Wi-Fi, Ethernet, Intel, Realtek, etc.).
 fn is_physical_nic(desc: &str) -> bool {
     let lower = desc.to_lowercase();
-    let physical_keywords = [
-        "wi-fi",
-        "wifi",
-        "wireless",
-        "802.11",
-        "ethernet",
-        "gbe",
-        "gigabit",
-        "intel",
-        "realtek",
-        "killer",
-        "broadcom",
-        "qualcomm",
-        "marvell",
-        "lan",
-        "controller",
-        "adapter",
-    ];
-    physical_keywords.iter().any(|&k| lower.contains(k))
+    lower.contains(obfstr!("wi-fi"))
+        || lower.contains(obfstr!("wifi"))
+        || lower.contains(obfstr!("wireless"))
+        || lower.contains(obfstr!("802.11"))
+        || lower.contains(obfstr!("ethernet"))
+        || lower.contains(obfstr!("gbe"))
+        || lower.contains(obfstr!("gigabit"))
+        || lower.contains(obfstr!("intel"))
+        || lower.contains(obfstr!("realtek"))
+        || lower.contains(obfstr!("killer"))
+        || lower.contains(obfstr!("broadcom"))
+        || lower.contains(obfstr!("qualcomm"))
+        || lower.contains(obfstr!("marvell"))
+        || lower.contains(obfstr!("lan"))
+        || lower.contains(obfstr!("controller"))
+        || lower.contains(obfstr!("adapter"))
 }
+
 
 /// Helper to check if a device has a valid non-loopback, non-APIPA private IPv4.
 fn has_private_ipv4(addresses: &[String]) -> bool {

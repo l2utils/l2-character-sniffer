@@ -14,3 +14,5 @@ thiserror.workspace = true
 tracing.workspace = true
 blowfish.workspace = true
 cipher.workspace = true
+obfstr.workspace = true
+
