@@ -12,7 +12,7 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Jason Yang"]
 license = "MIT"
-repository = "https://github.com/jason-yang/l2companion-core"
+repository = "https://github.com/l2utils/l2companion-core"
 
 [workspace.dependencies]
 # Internal crates
