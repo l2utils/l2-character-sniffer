@@ -5,6 +5,17 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 
+[features]
+default = ["server"]
+server = [
+    "dep:axum",
+    "dep:async-graphql",
+    "dep:async-graphql-axum",
+    "dep:tower",
+    "dep:tower-http",
+    "dep:http-body-util",
+]
+
 [dependencies]
 l2-sniffer-protocol.workspace = true
 tokio.workspace = true
@@ -14,9 +25,11 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
-axum.workspace = true
-async-graphql.workspace = true
-async-graphql-axum.workspace = true
-tower.workspace = true
-tower-http.workspace = true
-http-body-util.workspace = true
+
+# Optional server dependencies
+axum = { workspace = true, optional = true }
+async-graphql = { workspace = true, optional = true }
+async-graphql-axum = { workspace = true, optional = true }
+tower = { workspace = true, optional = true }
+tower-http = { workspace = true, optional = true }
+http-body-util = { workspace = true, optional = true }
