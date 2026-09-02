@@ -284,6 +284,7 @@ mod tests {
         let accounts: Vec<AccountSession> = serde_json::from_slice(&body).unwrap();
         assert_eq!(accounts.len(), 1);
         assert_eq!(accounts[0].account_name, "TestAccount");
+        assert_eq!(accounts[0].active_character, Some("TestHero".to_string()));
 
         // Test GET /api/characters
         let response = app.clone().oneshot(
@@ -313,7 +314,7 @@ mod tests {
 
         // Test POST /graphql (Query)
         let gql_body = serde_json::json!({
-            "query": "{ characters { name level } accounts { accountName } }"
+            "query": "{ characters { name level } accounts { accountName activeCharacter } }"
         });
         let response = app.clone().oneshot(
             Request::builder()
@@ -329,5 +330,6 @@ mod tests {
         assert_eq!(gql_res["data"]["characters"][0]["name"], "TestHero");
         assert_eq!(gql_res["data"]["characters"][0]["level"], 80);
         assert_eq!(gql_res["data"]["accounts"][0]["accountName"], "TestAccount");
+        assert_eq!(gql_res["data"]["accounts"][0]["activeCharacter"], "TestHero");
     }
 }
