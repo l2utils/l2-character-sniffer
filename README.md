@@ -8,10 +8,10 @@ Modular Rust monorepo for passive Lineage 2 network telemetry and character stat
 l2companion-core/
 ├── Cargo.toml                      # Workspace root (shared dependencies, profiles)
 ├── crates/
-│   ├── l2companion-protocol/        # Packet codecs, framing, opcodes, decryption (pure Rust)
-│   ├── l2companion-capture/         # Npcap/Pcap capture engine, interface discovery, TCP reassembly
-│   ├── l2companion-service/            # Character domain models, state machine, event broadcaster
-│   └── l2companion-cli/             # Standalone CLI capture runner & device inspector
+│   ├── l2companion-protocol/       # Packet codecs, framing, opcodes, decryption (pure Rust)
+│   ├── l2companion-capture/        # Npcap/Pcap capture engine, interface discovery, TCP reassembly
+│   ├── l2companion-service/        # Character domain models, state machine, event broadcaster
+│   └── l2companion-cli/            # Standalone CLI capture runner & device inspector
 ```
 
 ### Crates Overview
@@ -20,8 +20,8 @@ l2companion-core/
 | :--- | :--- | :--- |
 | **`l2companion-protocol`** | Library | Lineage 2 packet framing (`L2FrameCodec`), opcode registry (`ServerOpcode`), Blowfish / XOR decryption (`L2Cryptor`), and packet parsers (`UserInfo`, `StatusUpdate`, `ItemList`, etc.). |
 | **`l2companion-capture`** | Library | Packet capture engine using Npcap/libpcap, device discovery, and streaming packet worker. |
-| **`l2companion-service`** | Library | Decoupled domain models (`Character`, `Vitals`, `Stats`, `Location`) and state tracker (`CharacterTracker`). |
-| **`l2companion-cli`** | Binary | Standalone CLI (`l2companion devices`, `l2companion sniff`) for interface inspection and terminal monitoring. |
+| **`l2companion-service`** | Library | Decoupled domain models (`Character`, `Vitals`, `Stats`, `Location`), state tracker (`CharacterTracker`), and telemetry API. |
+| **`l2companion-cli`** | Binary | Standalone CLI (`l2companion devices`, `l2companion capture`) for interface inspection and terminal monitoring. |
 
 ---
 
@@ -53,8 +53,8 @@ To run the pre-compiled binary, end users **only** need the Npcap driver:
 
 2. **Start live packet capture (WiFi or default):**
    ```sh
-   cargo run -p l2companion-cli -- sniff
-   cargo run -p l2companion-cli -- sniff --device "\Device\NPF_{...}"
+   cargo run -p l2companion-cli -- capture
+   cargo run -p l2companion-cli -- capture --device "\Device\NPF_{...}"
    ```
 
 3. **Replay and analyze multi-client capture files (.pcap / .pcapng):**
@@ -67,5 +67,5 @@ To run the pre-compiled binary, end users **only** need the Npcap driver:
 ## Testing
 
 ```sh
-cargo test -p l2companion-protocol -p l2companion-service
+cargo test --workspace
 ```

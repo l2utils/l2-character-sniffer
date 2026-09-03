@@ -25,10 +25,10 @@ l2companion-core/
 ├── Cargo.toml                      # Workspace root (shared dependencies, profiles)
 ├── lib/                            # Vendored WinPcap/Npcap .lib import stubs (x64, arm64, x86)
 └── crates/
-    ├── l2companion-protocol/        # Pure Rust packet codecs, opcodes, crypto, binary parsers
-    ├── l2companion-capture/         # Npcap/libpcap engine, device discovery, pcap/stream ingestion
-    ├── l2companion-service/            # Domain models, character state tracking, GraphQL & Axum API
-    └── l2companion-cli/             # Interactive CLI runner, device selector, terminal dashboard
+    ├── l2companion-protocol/       # Pure Rust packet codecs, opcodes, crypto, binary parsers
+    ├── l2companion-capture/        # Npcap/libpcap engine, device discovery, pcap/stream ingestion
+    ├── l2companion-service/        # Domain models, character state tracking, GraphQL & Axum API
+    └── l2companion-cli/            # Interactive CLI runner, device selector, terminal dashboard
 ```
 
 ### Dependency Invariant & Layering Rules
@@ -94,7 +94,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 ## 3. Implementation Conventions & Best Practices
 
 ### Error Handling
-* In library crates (`protocol`, `capture`, `core`), use **`thiserror`** to define typed, explicit error enums (e.g., `FrameError`, `CaptureError`).
+* In library crates (`protocol`, `capture`, `service`), use **`thiserror`** to define typed, explicit error enums (e.g., `FrameError`, `CaptureError`).
 * In application crates (`cli`), use **`anyhow::Result`** for application-level context and clean error propagation.
 
 ### Packet Parsing & Protocol Resilience
@@ -128,7 +128,6 @@ cargo clippy --workspace --all-targets -- -D warnings
 3. **Documentation**: Update docstrings and keep `README.md` in sync when introducing new CLI flags, GraphQL queries, or packet decoders.
 4. **Synchronize Agent Configurations**: When updating instructions, workflows, or rules, always update all agent entry points in sync (`AGENTS.md`, `.github/copilot-instructions.md`, `CLAUDE.md`, `GEMINI.md`, and `.cursorrules`).
 
-
 ---
 
 ## 6. Pull Request & Git Guidelines
@@ -143,4 +142,3 @@ cargo clippy --workspace --all-targets -- -D warnings
 ### PR Creation & Shell Safety
 * **Avoid Shell Escaping Bugs**: When creating or editing pull requests with the GitHub CLI (`gh pr create` or `gh pr edit`), **always use `--body-file <path>`** instead of passing multiline strings via `--body "..."`. Inline shell arguments (especially in PowerShell/Windows) often introduce stray backslashes before backticks (e.g. `\`file\``) or asterisks.
 * Always verify formatting after creating/updating a PR with `gh pr view <number>` to ensure headers, code blocks, lists, and bold text render cleanly on GitHub.
-

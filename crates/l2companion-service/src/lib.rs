@@ -1,6 +1,6 @@
-//! # l2-core
+//! # l2companion-service
 //!
-//! Character state management, domain models, and telemetry telemetry engine.
+//! Character state management, domain models, and companion telemetry engine.
 
 pub mod event;
 #[cfg(feature = "server")]

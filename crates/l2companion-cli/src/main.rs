@@ -12,7 +12,7 @@ use l2companion_service::{start_api_server, CharacterTracker, CompanionEvent};
 use tokio::sync::mpsc;
 
 #[derive(Parser, Debug)]
-#[command(name = "l2companion", version, about = "Lineage 2 Character Data Telemetry & Telemetry Server CLI")]
+#[command(name = "l2companion", version, about = "Lineage 2 Telemetry Server CLI")]
 struct Cli {
     /// Enable debug mode (activates interactive GraphiQL browser UI)
     #[arg(long, global = true)]
@@ -30,8 +30,8 @@ struct Cli {
 enum Commands {
     /// List all network interfaces available for packet capture
     Devices,
-    /// Start sniffing network packets (live or offline pcap) and display character updates
-    Sniff {
+    /// Start capturing network packets (live or offline pcap) and display character updates
+    Capture {
         /// Network interface name to capture on (default: auto-detect)
         #[arg(short, long)]
         device: Option<String>,
@@ -130,7 +130,7 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Commands::Sniff {
+        Commands::Capture {
             device,
             pcap,
             filter,
@@ -229,7 +229,7 @@ fn prompt_for_device(show_virtual_nic: bool) -> Result<Option<String>> {
         })
         .collect();
 
-    let ans = inquire::Select::new("Select network interface to sniff on (Use ↑↓ arrows or type to filter):", options)
+    let ans = inquire::Select::new("Select network interface to capture on (Use ↑↓ arrows or type to filter):", options)
         .with_starting_cursor(default_idx)
         .with_page_size(10)
         .with_help_message("Press Enter to select, Esc/Ctrl+C to abort (run with --show-virtual-nic to include virtual adapters)")
@@ -273,7 +273,7 @@ async fn run_capture_session(
         builder = builder.filter(f);
     }
 
-    println!("\nInitializing Lineage 2 Telemetry...");
+    println!("\nInitializing Lineage 2 Companion...");
     let session = builder.build()?;
     println!("📡 Capture Source: {}", session.source_description());
 

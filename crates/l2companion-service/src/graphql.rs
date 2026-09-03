@@ -114,7 +114,7 @@ pub struct SubscriptionRoot;
 
 #[Subscription]
 impl SubscriptionRoot {
-    /// Live push stream of all telemetry events emitted by the telemetry (JSON serialized).
+    /// Live push stream of all telemetry events emitted (JSON serialized).
     async fn events(&self, ctx: &Context<'_>) -> impl Stream<Item = String> {
         let tracker = ctx.data_unchecked::<Arc<CharacterTracker>>();
         let rx = tracker.subscribe();

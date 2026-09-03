@@ -1,4 +1,4 @@
-//! Embedded GraphQL and WebSocket API Server for live telemetry telemetry.
+//! Embedded GraphQL and WebSocket API Server for live companion telemetry.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -99,7 +99,7 @@ async fn graphiql_handler() -> impl IntoResponse {
         GraphiQLSource::build()
             .endpoint("/graphql")
             .subscription_endpoint("/graphql/ws")
-            .title("Lineage 2 Character Telemetry - GraphQL Explorer")
+            .title("Lineage 2 Companion - GraphQL Explorer")
             .finish(),
     )
 }

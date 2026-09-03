@@ -297,7 +297,7 @@ impl CaptureSession {
                     }
                     let desc = device_info.description.as_deref().unwrap_or("Adapter");
                     let ips = device_info.addresses.join(", ");
-                    info!("Telemetry live capture started on {} [{}] (IPs: {})", device_info.name, desc, ips);
+                    info!("Live capture started on {} [{}] (IPs: {})", device_info.name, desc, ips);
 
                     loop {
                         match cap.next_packet() {
@@ -314,13 +314,13 @@ impl CaptureSession {
                     }
                 }
                 CaptureSession::OfflineFile { path, game_ports } => {
-                    info!("Telemetry processing offline capture: {path}");
+                    info!("Processing offline capture: {path}");
                     if let Err(e) = Self::read_offline_file(path, game_ports, &mut streams, &tx) {
                         error!("Error processing offline capture file: {e}");
                     }
                 }
             }
-            info!("Telemetry capture worker finished (tracked {} active client streams)", streams.len());
+            info!("Capture worker finished (tracked {} active client streams)", streams.len());
         })
     }
 
