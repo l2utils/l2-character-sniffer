@@ -1,6 +1,6 @@
 # l2companion-core
 
-Modular Rust monorepo for sniffing Lineage 2 network traffic and tracking character state.
+Modular Rust monorepo for passive Lineage 2 network telemetry and character state tracking.
 
 ## Workspace Architecture
 

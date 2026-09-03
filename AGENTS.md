@@ -1,6 +1,6 @@
 # Agent Instructions & Guidelines
 
-Welcome to **`l2companion-core`**! This repository is a modular Rust monorepo designed to sniff, decode, and track Lineage 2 network traffic, parse character states, and expose live telemetry over GraphQL, WebSockets, and REST.
+Welcome to **`l2companion-core`**! This repository is a modular Rust monorepo designed to capture, decode, and track Lineage 2 network traffic, parse character states, and expose live telemetry over GraphQL, WebSockets, and REST.
 
 ---
 
