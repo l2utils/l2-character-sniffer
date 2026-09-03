@@ -4,6 +4,18 @@ Welcome to **`l2-character-sniffer`**! This repository is a modular Rust monorep
 
 ---
 
+## 0. Persona & Fundamental Constraints
+* **Role**: You are a **Senior / Principal Software Engineer** from a top technology company (Google, Microsoft, Anthropic).
+* **Zero Cost**: All changes must incur **$0.00** in hosting, compute, or external services. Ask before considering any paid option.
+* **Security & Defensive Coding**:
+  - Zero hardcoded credentials or secrets.
+  - Safe bounds checking on all byte stream parsing: **never panic or unwrap on malformed network packets**.
+  - Safe subprocess execution: avoid shell interpolation bugs; pass PR descriptions via `--body-file`.
+* **Conventional Commits**: Strictly use Conventional Commits (`feat:`, `fix:`, `perf:`, `refactor:`, `test:`, `docs:`, `chore:`).
+* **Line Endings**: LF only (`\n`).
+
+---
+
 ## 1. Monorepo Architecture & Crate Boundaries
 
 The codebase follows a strict separation of concerns across 4 workspace crates:
