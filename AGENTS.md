@@ -127,6 +127,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 2. **Preserve Architectural Purity**: Keep `l2companion-protocol` strictly zero-IO and platform-agnostic.
 3. **Documentation**: Update docstrings and keep `README.md` in sync when introducing new CLI flags, GraphQL queries, or packet decoders.
 4. **Synchronize Agent Configurations**: When updating instructions, workflows, or rules, always update all agent entry points in sync (`AGENTS.md`, `.github/copilot-instructions.md`, `CLAUDE.md`, `GEMINI.md`, and `.cursorrules`).
+5. **Worktree Isolation per Session**: For each conversation/session in this project, if there are code changes to a git repo, create a worktree and track it in the conversation/worktree to allow for better parallelization of conversations/sessions.
 
 ---
 
@@ -142,3 +143,6 @@ cargo clippy --workspace --all-targets -- -D warnings
 ### PR Creation & Shell Safety
 * **Avoid Shell Escaping Bugs**: When creating or editing pull requests with the GitHub CLI (`gh pr create` or `gh pr edit`), **always use `--body-file <path>`** instead of passing multiline strings via `--body "..."`. Inline shell arguments (especially in PowerShell/Windows) often introduce stray backslashes before backticks (e.g. `\`file\``) or asterisks.
 * Always verify formatting after creating/updating a PR with `gh pr view <number>` to ensure headers, code blocks, lists, and bold text render cleanly on GitHub.
+
+### Git Worktrees & Session Isolation
+* For each conversation/session involving code changes, create an isolated git worktree and track it in the conversation/worktree to avoid branch collisions and allow concurrent sessions.
