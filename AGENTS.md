@@ -133,11 +133,12 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 ## 6. Pull Request & Git Guidelines
 
-### PR Structure & Standards
-* Every PR must follow structured markdown formatting with clear sections:
+### PR Structure & Templates
+* Every PR must strictly follow and populate the sections in `.github/pull_request_template.md`:
   - `## Summary`: High-level explanation of the problem and resolution.
   - `## Changes`: Bulleted breakdown of modifications grouped by crate or file.
   - `## Verification`: Concrete verification steps with exact command lines and results.
+  - `## Compliance Checklist`: Confirm zero cost, security checks, and conventional commits.
 
 ### PR Creation & Shell Safety
 * **Avoid Shell Escaping Bugs**: When creating or editing pull requests with the GitHub CLI (`gh pr create` or `gh pr edit`), **always use `--body-file <path>`** instead of passing multiline strings via `--body "..."`. Inline shell arguments (especially in PowerShell/Windows) often introduce stray backslashes before backticks (e.g. `\`file\``) or asterisks.
